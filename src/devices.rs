@@ -1,9 +1,11 @@
 pub mod dummy;
 
-use anyhow::bail;
+use std::collections::LinkedList;
+
+use anyhow::Ok;
 use log::{debug, info};
 
-const IFNAMSIZ: usize = 16;
+use crate::interrupt::IrqEntry;
 
 pub const NET_DEVICE_TYPE_DUMMY: u16 = 0x0000;
 
@@ -15,24 +17,18 @@ const NET_DEVICE_FLAG_NEED_ARP: u16 = 0x0100;
 
 pub const NET_DEVICE_ADDR_LEN: usize = 16;
 
-pub fn run_net(dev: &mut NetDevice) -> anyhow::Result<()> {
+pub fn run_net(devices: &mut NetDevices) -> anyhow::Result<()> {
     info!("open all devices");
-    let mut p = dev;
-    p.open()?;
-    while let Some(dev) = p.next.as_mut() {
+    for dev in devices.iter_mut() {
         dev.open()?;
-        p = dev;
     }
     return Ok(());
 }
 
-pub fn stop_net(dev: &mut NetDevice) -> anyhow::Result<()> {
+pub fn stop_net(devices: &mut NetDevices) -> anyhow::Result<()> {
     info!("close all devices");
-    let mut p = dev;
-    p.close()?;
-    while let Some(dev) = p.next.as_mut() {
+    for dev in devices.iter_mut() {
         dev.close()?;
-        p = dev;
     }
     return Ok(());
 }
@@ -45,6 +41,8 @@ pub fn net_input_handler(ty: u16, data: &[u8], len: usize) -> anyhow::Result<()>
     Ok(())
 }
 
+pub type NetDevices = LinkedList<NetDevice>;
+
 #[derive(Debug, Clone)]
 pub enum CastType {
     Peer([u8; NET_DEVICE_ADDR_LEN]),
@@ -53,7 +51,6 @@ pub enum CastType {
 
 #[derive(Debug, Clone)]
 pub struct NetDevice {
-    pub next: Option<Box<NetDevice>>,
     pub index: usize,
     pub name: String,
     pub ty: u16,
@@ -64,25 +61,14 @@ pub struct NetDevice {
     pub hw_addr: [u8; NET_DEVICE_ADDR_LEN],
     pub cast_type: CastType,
     pub ops: NetDeviceOps,
-    // pub priv_data: *mut c_void,
+    pub irq_entry: IrqEntry,
 }
 
 impl NetDevice {
-    // dev -> self(net2) -> net1 -> net0 -> None
-    pub fn register(&mut self, mut dev: NetDevice) {
-        dev.index = self.index + 1;
-        dev.name = format!("net{}", dev.index);
-        let p = self.clone();
-        dev.next = Some(Box::new(p));
-        // dbg!(&dev);
-        *self = dev;
-        info!("registered device, dev: {}, type: {}", self.name, self.ty);
-    }
-
     pub fn open(&mut self) -> anyhow::Result<()> {
         debug!("open device, dev: {}", self.name);
         if self.is_up() {
-            bail!("device is already up, dev: {}", self.name);
+            anyhow::bail!("device is already up, dev: {}", self.name);
         }
 
         if let Err(err) = (self.ops.open)(self) {
@@ -108,7 +94,7 @@ impl NetDevice {
 
     pub fn close(&mut self) -> anyhow::Result<()> {
         if !self.is_up() {
-            bail!("device is already down, dev: {}", self.name);
+            anyhow::bail!("device is already down, dev: {}", self.name);
         }
 
         if let Err(err) = (self.ops.close)(self) {
@@ -128,11 +114,11 @@ impl NetDevice {
         dst: [u8; NET_DEVICE_ADDR_LEN],
     ) -> anyhow::Result<()> {
         if !self.is_up() {
-            bail!("device not opened, name: {}", self.name);
+            anyhow::bail!("device not opened, name: {}", self.name);
         }
 
         if len > self.mtu {
-            bail!(
+            anyhow::bail!(
                 "too long packet, dev: {}, len: {}, mtu: {}",
                 self.name,
                 len,
@@ -144,6 +130,13 @@ impl NetDevice {
             return Err(err);
         }
         return Ok(());
+    }
+
+    pub fn handle_isr(&self) {
+        debug!(
+            "handle interrupt, dev: {}, irq: {}",
+            self.name, self.irq_entry.irq
+        );
     }
 }
 
@@ -165,48 +158,31 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_register() {
-        let mut dev = NetDevice::dummy();
-        dev.register(NetDevice::dummy());
-        dev.register(NetDevice::dummy());
-        dev.register(NetDevice::dummy());
-
-        assert_eq!(dev.index, 3);
-        let net2 = dev.next.as_ref().unwrap();
-        assert_eq!(net2.index, 2);
-        let net1 = net2.next.as_ref().unwrap();
-        assert_eq!(net1.index, 1);
-        let net0 = net1.next.as_ref().unwrap();
-        assert_eq!(net0.index, 0);
-        assert!(net0.next.is_none());
-    }
-
-    #[test]
     fn open_device() {
-        let mut dev = NetDevice::dummy();
-        dev.register(NetDevice::dummy());
-        dev.register(NetDevice::dummy());
+        let mut devices = NetDevices::new();
+        devices.push_back(NetDevice::dummy());
+        devices.push_back(NetDevice::dummy());
+        devices.push_back(NetDevice::dummy());
 
-        run_net(&mut dev).unwrap();
-        assert_eq!(dev.flags, NET_DEVICE_FLAG_UP);
-        let net1 = dev.next.as_ref().unwrap();
-        assert_eq!(net1.flags, NET_DEVICE_FLAG_UP);
-        let net0 = net1.next.as_ref().unwrap();
-        assert_eq!(net0.flags, NET_DEVICE_FLAG_UP);
+        run_net(&mut devices).unwrap();
+        let mut iter = devices.iter();
+        assert_eq!(iter.next().unwrap().flags, NET_DEVICE_FLAG_UP);
+        assert_eq!(iter.next().unwrap().flags, NET_DEVICE_FLAG_UP);
+        assert_eq!(iter.next().unwrap().flags, NET_DEVICE_FLAG_UP);
     }
 
     #[test]
     fn close_device() {
-        let mut dev = NetDevice::dummy();
-        dev.register(NetDevice::dummy());
-        dev.register(NetDevice::dummy());
+        let mut devices = NetDevices::new();
+        devices.push_back(NetDevice::dummy());
+        devices.push_back(NetDevice::dummy());
+        devices.push_back(NetDevice::dummy());
 
-        run_net(&mut dev).unwrap();
-        stop_net(&mut dev).unwrap();
-        assert_eq!(dev.flags, 0x0000);
-        let net1 = dev.next.as_ref().unwrap();
-        assert_eq!(net1.flags, 0x0000);
-        let net0 = net1.next.as_ref().unwrap();
-        assert_eq!(net0.flags, 0x0000);
+        run_net(&mut devices).unwrap();
+        stop_net(&mut devices).unwrap();
+        let mut iter = devices.iter();
+        assert_eq!(iter.next().unwrap().flags, 0x0000);
+        assert_eq!(iter.next().unwrap().flags, 0x0000);
+        assert_eq!(iter.next().unwrap().flags, 0x0000);
     }
 }

@@ -1,17 +1,13 @@
-use std::{
-    sync::mpsc,
-    thread::{sleep, spawn},
-    time::Duration,
-};
+use std::sync::{mpsc, Arc, Barrier};
 
-use devices::NetDevice;
-use log::{error, info};
-use signal_hook::{
-    consts::{SIGINT, SIGTERM, TERM_SIGNALS},
-    iterator::Signals,
-};
+use app::App;
+use interrupt::INTR_IRQ_DUMMY;
+use log::{debug, error, info};
+use signal_hook::{consts::TERM_SIGNALS, iterator::Signals};
 
+mod app;
 mod devices;
+mod interrupt;
 
 fn main() {
     env_logger::init();
@@ -22,45 +18,28 @@ fn main() {
     }
 
     let (tx, rx) = mpsc::channel();
-    let mut signals = Signals::new(TERM_SIGNALS).unwrap();
+    let barrier = Arc::new(Barrier::new(2));
+    let app = App::new();
+    let app_join = app.run(rx, barrier.clone());
+
+    let mut signals = vec![INTR_IRQ_DUMMY];
+    signals.extend(TERM_SIGNALS);
+    debug!("signals: {:?}", signals);
+    let mut signals = Signals::new(signals).unwrap();
     let handle = signals.handle();
-    let thread = spawn(move || {
-        for signal in &mut signals {
-            match signal {
-                SIGTERM | SIGINT => {
-                    info!("terminating app");
-                    break;
-                }
-                _ => {}
-            }
-        }
-        tx.send(()).unwrap();
-    });
-
-    let mut dev = NetDevice::dummy();
-    dev.register(NetDevice::dummy());
-    if let Err(err) = devices::run_net(&mut dev) {
-        error!("run net failed: {:?}", err);
-        return;
-    }
-
-    let data = [0x01, 0x02, 0x03, 0x04, 0x05];
-    while rx.try_recv().is_err() {
-        if let Err(err) = dev.transmit(
-            0x0800,
-            &data,
-            data.len(),
-            [0xff; devices::NET_DEVICE_ADDR_LEN],
-        ) {
-            error!("transmit packet failed: {:?}", err);
+    // Without waiting for the barrier, a signal may be sent before the app is ready to handle it.
+    barrier.wait();
+    for signal in signals.forever() {
+        debug!("received signal: {}", signal);
+        if TERM_SIGNALS.contains(&signal) {
+            info!("terminating app");
             break;
         }
-        sleep(Duration::from_secs(1));
+        app.handle_irq(signal);
     }
 
-    if let Err(err) = devices::stop_net(&mut dev) {
-        error!("stop net failed: {:?}", err);
-    }
+    tx.send(()).unwrap();
+    app_join.join().unwrap();
     handle.close();
-    thread.join().unwrap();
+    app.stop();
 }

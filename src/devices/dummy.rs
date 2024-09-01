@@ -1,12 +1,14 @@
 use log::debug;
+use signal_hook::consts::SIGUSR1;
 
 use crate::devices::{NetDevice, NetDeviceOps, NET_DEVICE_ADDR_LEN};
+use crate::interrupt::{IrqEntry, INTR_IRQ_SHARED};
 
-fn open(dev: &mut NetDevice) -> anyhow::Result<()> {
+fn open(_: &mut NetDevice) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn close(dev: &mut NetDevice) -> anyhow::Result<()> {
+fn close(_: &mut NetDevice) -> anyhow::Result<()> {
     Ok(())
 }
 
@@ -27,8 +29,12 @@ fn transmit(
 
 impl NetDevice {
     pub fn dummy() -> NetDevice {
+        let irq_entry = IrqEntry {
+            irq: SIGUSR1,
+            flags: INTR_IRQ_SHARED,
+        };
+
         NetDevice {
-            next: None,
             index: 0,
             name: "dummy".to_string(),
             ty: crate::devices::NET_DEVICE_TYPE_DUMMY,
@@ -43,6 +49,7 @@ impl NetDevice {
                 close,
                 transmit,
             },
+            irq_entry,
         }
     }
 }
