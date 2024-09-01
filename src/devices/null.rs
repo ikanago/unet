@@ -4,6 +4,8 @@ use signal_hook::consts::SIGUSR1;
 use crate::devices::{NetDevice, NetDeviceOps, NET_DEVICE_ADDR_LEN};
 use crate::interrupt::{IrqEntry, INTR_IRQ_SHARED};
 
+use super::NetDeviceQueueEntry;
+
 fn open(_: &mut NetDevice) -> anyhow::Result<()> {
     Ok(())
 }
@@ -14,21 +16,20 @@ fn close(_: &mut NetDevice) -> anyhow::Result<()> {
 
 fn transmit(
     dev: &mut NetDevice,
-    ty: u16,
     data: &[u8],
     len: usize,
     dst: [u8; NET_DEVICE_ADDR_LEN],
 ) -> anyhow::Result<()> {
     debug!(
-        "transmit packet, dev: {}, ty: {}, len: {}, dst: {:?}",
-        dev.name, ty, len, dst
+        "transmit packet, dev: {}, len: {}, dst: {:?}",
+        dev.name, len, dst
     );
     debug!("data: {:?}", data);
     Ok(())
 }
 
 impl NetDevice {
-    pub fn dummy() -> NetDevice {
+    pub fn null() -> NetDevice {
         let irq_entry = IrqEntry {
             irq: SIGUSR1,
             flags: INTR_IRQ_SHARED,
@@ -36,8 +37,8 @@ impl NetDevice {
 
         NetDevice {
             index: 0,
-            name: "dummy".to_string(),
-            ty: crate::devices::NET_DEVICE_TYPE_DUMMY,
+            name: "null".to_string(),
+            ty: super::NetDeviceType::Null,
             mtu: 1500,
             flags: 0,
             header_len: 0,
@@ -50,6 +51,7 @@ impl NetDevice {
                 transmit,
             },
             irq_entry,
+            queue: NetDeviceQueueEntry::Null,
         }
     }
 }

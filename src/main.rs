@@ -1,7 +1,7 @@
 use std::sync::{mpsc, Arc, Barrier};
 
 use app::App;
-use interrupt::INTR_IRQ_DUMMY;
+use interrupt::{INTR_IRQ_LOOPBACK, INTR_IRQ_NULL};
 use log::{debug, error, info};
 use signal_hook::{consts::TERM_SIGNALS, iterator::Signals};
 
@@ -22,7 +22,7 @@ fn main() {
     let app = App::new();
     let app_join = app.run(rx, barrier.clone());
 
-    let mut signals = vec![INTR_IRQ_DUMMY];
+    let mut signals = vec![INTR_IRQ_NULL, INTR_IRQ_LOOPBACK];
     signals.extend(TERM_SIGNALS);
     debug!("signals: {:?}", signals);
     let mut signals = Signals::new(signals).unwrap();

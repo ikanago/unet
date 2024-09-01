@@ -4,12 +4,9 @@ use std::{
     time::Duration,
 };
 
-use log::info;
+use log::{error, info};
 
-use crate::{
-    devices::{run_net, stop_net, NetDevice, NetDevices},
-    interrupt::INTR_IRQ_DUMMY,
-};
+use crate::devices::{run_net, stop_net, NetDevice, NetDevices};
 
 pub struct App {
     devices: Arc<Mutex<NetDevices>>,
@@ -18,7 +15,7 @@ pub struct App {
 impl App {
     pub fn new() -> Self {
         let mut devices = NetDevices::new();
-        devices.push_back(NetDevice::dummy());
+        devices.push_back(NetDevice::loopback());
         run_net(&mut devices).unwrap();
 
         App {
@@ -31,12 +28,11 @@ impl App {
         info!("running app");
         let handle = std::thread::spawn(move || {
             barrier.wait();
-            signal_hook::low_level::raise(INTR_IRQ_DUMMY).unwrap();
             let data = [0x01, 0x02, 0x03, 0x04, 0x05];
             while rx.try_recv().is_err() {
                 let mut devices = devices.lock().unwrap();
-                let front = devices.front_mut().unwrap();
-                if let Err(err) = front.transmit(
+                let device = devices.front_mut().unwrap();
+                if let Err(err) = device.transmit(
                     0x0800,
                     &data,
                     data.len(),
@@ -61,7 +57,9 @@ impl App {
     pub fn handle_irq(&self, irq: i32) {
         for dev in self.devices.lock().unwrap().iter() {
             if dev.irq_entry.irq == irq {
-                dev.handle_isr();
+                if let Err(err) = dev.handle_isr() {
+                    error!("handle irq failed: {:?}", err);
+                }
                 break;
             }
         }

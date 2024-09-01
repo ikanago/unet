@@ -1,16 +1,21 @@
-pub mod dummy;
+pub mod loopback;
+pub mod null;
 
-use std::collections::LinkedList;
+use std::{
+    collections::{LinkedList, VecDeque},
+    sync::{Arc, Mutex},
+};
 
-use anyhow::Ok;
 use log::{debug, info};
 
 use crate::interrupt::IrqEntry;
 
-pub const NET_DEVICE_TYPE_DUMMY: u16 = 0x0000;
+pub const NET_DEVICE_TYPE_NULL: u16 = 0x0000;
+pub const NET_DEVICE_TYPE_LOOPBACK: u16 = 0x0001;
+pub const NET_DEVICE_TYPE_ETHERNET: u16 = 0x0002;
 
 const NET_DEVICE_FLAG_UP: u16 = 0x0001;
-const NET_DEVICE_FLAG_LOOPBACK: u16 = 0x0010;
+pub const NET_DEVICE_FLAG_LOOPBACK: u16 = 0x0010;
 const NET_DEVICE_FLAG_BROADCAST: u16 = 0x0020;
 const NET_DEVICE_FLAG_P2P: u16 = 0x0040;
 const NET_DEVICE_FLAG_NEED_ARP: u16 = 0x0100;
@@ -37,11 +42,18 @@ pub fn init_net() -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn net_input_handler(ty: u16, data: &[u8], len: usize) -> anyhow::Result<()> {
+pub fn net_input_handler(data: &[u8]) -> anyhow::Result<()> {
+    debug!("net input handler, len: {}", data.len());
     Ok(())
 }
 
 pub type NetDevices = LinkedList<NetDevice>;
+
+#[derive(Clone, Debug)]
+pub enum NetDeviceQueueEntry {
+    Null,
+    Loopback(Arc<Mutex<VecDeque<loopback::LoopbackQueueEntry>>>),
+}
 
 #[derive(Debug, Clone)]
 pub enum CastType {
@@ -50,10 +62,16 @@ pub enum CastType {
 }
 
 #[derive(Debug, Clone)]
+pub enum NetDeviceType {
+    Null,
+    Loopback,
+}
+
+#[derive(Debug, Clone)]
 pub struct NetDevice {
     pub index: usize,
     pub name: String,
-    pub ty: u16,
+    pub ty: NetDeviceType,
     pub mtu: usize,
     pub flags: u16,
     pub header_len: u16,
@@ -62,6 +80,7 @@ pub struct NetDevice {
     pub cast_type: CastType,
     pub ops: NetDeviceOps,
     pub irq_entry: IrqEntry,
+    pub queue: NetDeviceQueueEntry,
 }
 
 impl NetDevice {
@@ -126,17 +145,34 @@ impl NetDevice {
             );
         }
 
-        if let Err(err) = (self.ops.transmit)(self, ty, data, len, dst) {
+        if let Err(err) = (self.ops.transmit)(self, data, len, dst) {
             return Err(err);
         }
         return Ok(());
     }
 
-    pub fn handle_isr(&self) {
+    pub fn handle_isr(&self) -> anyhow::Result<()> {
         debug!(
             "handle interrupt, dev: {}, irq: {}",
             self.name, self.irq_entry.irq
         );
+        let payload = match self.ty {
+            NetDeviceType::Null => {
+                debug!("null device, dev: {}", self.name);
+                return Ok(());
+            }
+            NetDeviceType::Loopback => {
+                debug!("loopback device, dev: {}", self.name);
+                loopback::read_data(self)?
+            }
+        };
+
+        let Some(payload) = payload else {
+            debug!("no payload, dev: {}", self.name);
+            return Ok(());
+        };
+        net_input_handler(&payload.data).unwrap();
+        Ok(())
     }
 }
 
@@ -146,7 +182,6 @@ pub struct NetDeviceOps {
     pub close: fn(dev: &mut NetDevice) -> anyhow::Result<()>,
     pub transmit: fn(
         dev: &mut NetDevice,
-        ty: u16,
         data: &[u8],
         len: usize,
         dst: [u8; NET_DEVICE_ADDR_LEN],
@@ -160,9 +195,9 @@ mod tests {
     #[test]
     fn open_device() {
         let mut devices = NetDevices::new();
-        devices.push_back(NetDevice::dummy());
-        devices.push_back(NetDevice::dummy());
-        devices.push_back(NetDevice::dummy());
+        devices.push_back(NetDevice::null());
+        devices.push_back(NetDevice::null());
+        devices.push_back(NetDevice::null());
 
         run_net(&mut devices).unwrap();
         let mut iter = devices.iter();
@@ -174,9 +209,9 @@ mod tests {
     #[test]
     fn close_device() {
         let mut devices = NetDevices::new();
-        devices.push_back(NetDevice::dummy());
-        devices.push_back(NetDevice::dummy());
-        devices.push_back(NetDevice::dummy());
+        devices.push_back(NetDevice::null());
+        devices.push_back(NetDevice::null());
+        devices.push_back(NetDevice::null());
 
         run_net(&mut devices).unwrap();
         stop_net(&mut devices).unwrap();
