@@ -7,8 +7,12 @@ use std::{
 };
 
 use log::{debug, info};
+use signal_hook::low_level::raise;
 
-use crate::interrupt::IrqEntry;
+use crate::{
+    interrupt::{IrqEntry, INTR_IRQ_L3},
+    protocols::{ipv4::Ipv4QueueEntry, NetProtocols, ProtocolType},
+};
 
 pub const NET_DEVICE_TYPE_NULL: u16 = 0x0000;
 pub const NET_DEVICE_TYPE_LOOPBACK: u16 = 0x0001;
@@ -39,11 +43,6 @@ pub fn stop_net(devices: &mut NetDevices) -> anyhow::Result<()> {
 }
 
 pub fn init_net() -> anyhow::Result<()> {
-    Ok(())
-}
-
-pub fn net_input_handler(data: &[u8]) -> anyhow::Result<()> {
-    debug!("net input handler, len: {}", data.len());
     Ok(())
 }
 
@@ -127,7 +126,6 @@ impl NetDevice {
 
     pub fn transmit(
         &mut self,
-        ty: u16,
         data: &[u8],
         len: usize,
         dst: [u8; NET_DEVICE_ADDR_LEN],
@@ -151,7 +149,7 @@ impl NetDevice {
         return Ok(());
     }
 
-    pub fn handle_isr(&self) -> anyhow::Result<()> {
+    pub fn handle_isr(&self, protocols: &mut NetProtocols) -> anyhow::Result<()> {
         debug!(
             "handle interrupt, dev: {}, irq: {}",
             self.name, self.irq_entry.irq
@@ -171,7 +169,17 @@ impl NetDevice {
             debug!("no payload, dev: {}", self.name);
             return Ok(());
         };
-        net_input_handler(&payload.data).unwrap();
+
+        for protocol in protocols.iter() {
+            if protocol.protocol_type == ProtocolType::Ipv4 {
+                debug!("net protocol queue pushed, protocol",);
+                let mut queue = protocol.queue.lock().unwrap();
+                queue.push_back(Ipv4QueueEntry { data: payload.data });
+                break;
+            }
+        }
+
+        raise(INTR_IRQ_L3)?;
         Ok(())
     }
 }
