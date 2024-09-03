@@ -3,7 +3,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use ipv4::Ipv4QueueEntry;
+use ipv4::{Ipv4Header, Ipv4QueueEntry};
 use log::debug;
 
 pub mod ipv4;
@@ -27,6 +27,9 @@ impl NetProtocol {
         while let Some(entry) = queue.pop_front() {
             debug!("ipv4 protocol queue popped, len: {}", queue.len());
             debug!("ipv4 protocol queue entry: {:?}", entry);
+            // std::thread::sleep(std::time::Duration::from_millis(500));
+            let header = Ipv4Header::try_from(entry.data.as_ref())?;
+            header.validate()?;
         }
         Ok(())
     }
