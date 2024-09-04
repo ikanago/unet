@@ -32,6 +32,7 @@ pub const NET_DEVICE_ADDR_LEN: usize = 16;
 pub fn run_net(devices: &mut NetDevices) -> anyhow::Result<()> {
     info!("open all devices");
     for dev in devices.iter_mut() {
+        let mut dev = dev.lock().unwrap();
         dev.open()?;
     }
     return Ok(());
@@ -40,6 +41,7 @@ pub fn run_net(devices: &mut NetDevices) -> anyhow::Result<()> {
 pub fn stop_net(devices: &mut NetDevices) -> anyhow::Result<()> {
     info!("close all devices");
     for dev in devices.iter_mut() {
+        let mut dev = dev.lock().unwrap();
         dev.close()?;
     }
     return Ok(());
@@ -49,7 +51,7 @@ pub fn init_net() -> anyhow::Result<()> {
     Ok(())
 }
 
-pub type NetDevices = LinkedList<NetDevice>;
+pub type NetDevices = LinkedList<Arc<Mutex<NetDevice>>>;
 
 #[derive(Clone, Debug)]
 pub enum NetDeviceQueueEntry {
@@ -223,29 +225,38 @@ mod tests {
     #[test]
     fn open_device() {
         let mut devices = NetDevices::new();
-        devices.push_back(NetDevice::null());
-        devices.push_back(NetDevice::null());
-        devices.push_back(NetDevice::null());
+        devices.push_back(Arc::new(Mutex::new(NetDevice::null())));
+        devices.push_back(Arc::new(Mutex::new(NetDevice::null())));
+        devices.push_back(Arc::new(Mutex::new(NetDevice::null())));
 
         run_net(&mut devices).unwrap();
         let mut iter = devices.iter();
-        assert_eq!(iter.next().unwrap().flags, NET_DEVICE_FLAG_UP);
-        assert_eq!(iter.next().unwrap().flags, NET_DEVICE_FLAG_UP);
-        assert_eq!(iter.next().unwrap().flags, NET_DEVICE_FLAG_UP);
+        assert_eq!(
+            iter.next().unwrap().lock().unwrap().flags,
+            NET_DEVICE_FLAG_UP
+        );
+        assert_eq!(
+            iter.next().unwrap().lock().unwrap().flags,
+            NET_DEVICE_FLAG_UP
+        );
+        assert_eq!(
+            iter.next().unwrap().lock().unwrap().flags,
+            NET_DEVICE_FLAG_UP
+        );
     }
 
     #[test]
     fn close_device() {
         let mut devices = NetDevices::new();
-        devices.push_back(NetDevice::null());
-        devices.push_back(NetDevice::null());
-        devices.push_back(NetDevice::null());
+        devices.push_back(Arc::new(Mutex::new(NetDevice::null())));
+        devices.push_back(Arc::new(Mutex::new(NetDevice::null())));
+        devices.push_back(Arc::new(Mutex::new(NetDevice::null())));
 
         run_net(&mut devices).unwrap();
         stop_net(&mut devices).unwrap();
         let mut iter = devices.iter();
-        assert_eq!(iter.next().unwrap().flags, 0x0000);
-        assert_eq!(iter.next().unwrap().flags, 0x0000);
-        assert_eq!(iter.next().unwrap().flags, 0x0000);
+        assert_eq!(iter.next().unwrap().lock().unwrap().flags, 0x0000);
+        assert_eq!(iter.next().unwrap().lock().unwrap().flags, 0x0000);
+        assert_eq!(iter.next().unwrap().lock().unwrap().flags, 0x0000);
     }
 }

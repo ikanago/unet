@@ -1,18 +1,24 @@
 use std::{
-    collections::VecDeque,
-    sync::{Arc, Mutex},
+    collections::{LinkedList, VecDeque},
+    sync::{Arc, Mutex, Weak},
 };
 
 use anyhow::ensure;
+use log::debug;
 
 use crate::devices::NetDevice;
 
-use super::{NetInterfaceFamily, NetProtocol, ProtocolType};
+use super::{NetInterfaceFamily, NetProtocol, NetProtocolContext, ProtocolType};
 
 const IPV4_HEADER_MIN_LENGTH: u8 = 20;
 const IPV4_HEADER_MAX_LENGTH: u8 = 60;
 const IPV4_VERSION: u8 = 4;
+pub const IPV4_ADDR_ANY: Ipv4Address = Ipv4Address(0x00000000); // 0.0.0.0
 pub const IPV4_ADDR_BROADCAST: Ipv4Address = Ipv4Address(0xffffffff); // 255.255.255.255
+
+pub enum IpProtocolNumber {
+    Icmp = 1,
+}
 
 #[derive(Clone, Debug)]
 pub struct Ipv4QueueEntry {
@@ -118,14 +124,8 @@ impl Ipv4Header {
 
     fn validate_checksum(&self) -> anyhow::Result<()> {
         let data = self.to_bytes();
-        let mut sum = data
-            .chunks(2)
-            .map(|x| u16::from_be_bytes([x[0], x[1]]) as u32)
-            .sum::<u32>();
-        while sum.checked_shr(16).unwrap_or(0) != 0 {
-            sum = (sum & 0xffff) + sum.checked_shr(16).unwrap_or(0);
-        }
-        ensure!(sum == 0xffff, "invalid checksum: 0x{:04x}", !sum);
+        let checksum = calculate_checksum(&data);
+        ensure!(checksum == 0, "invalid checksum: 0x{:04x}", checksum);
         Ok(())
     }
 
@@ -155,6 +155,17 @@ impl Ipv4Header {
     }
 }
 
+fn calculate_checksum(data: &[u8]) -> u16 {
+    let mut sum = data
+        .chunks(2)
+        .map(|x| u16::from_be_bytes([x[0], x[1]]) as u32)
+        .sum::<u32>();
+    while sum.checked_shr(16).unwrap_or(0) != 0 {
+        sum = (sum & 0xffff) + sum.checked_shr(16).unwrap_or(0);
+    }
+    !sum as u16
+}
+
 impl From<&[u8]> for Ipv4Header {
     fn from(value: &[u8]) -> Self {
         Ipv4Header {
@@ -182,18 +193,161 @@ pub struct Ipv4Interface {
     pub unicast: Ipv4Address,
     pub netmask: Ipv4Address,
     pub broadcast: Ipv4Address,
+    pub device: Option<Weak<Mutex<NetDevice>>>,
 }
 
 impl Ipv4Interface {
-    pub fn new(unicast: Ipv4Address, netmask: Ipv4Address) -> Self {
+    pub fn new(unicast: Ipv4Address, netmask: Ipv4Address, device: Arc<Mutex<NetDevice>>) -> Self {
         let broadcast = Ipv4Address(unicast.0 & 0xffffff00 | !netmask.0 & 0xff);
         Ipv4Interface {
             family: NetInterfaceFamily::Ipv4,
             unicast,
             netmask,
             broadcast,
+            device: Some(Arc::downgrade(&device)),
         }
     }
+
+    pub fn includes(&self, unicast: Ipv4Address) -> bool {
+        // output self in binary
+        debug!("netmask: {:032b}", self.netmask.0);
+        debug!("unicast: {:032b}", unicast.0);
+        self.netmask.0 & self.unicast.0 == self.netmask.0 & unicast.0
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct IpRouter {
+    pub interfaces: LinkedList<IpRoute>,
+}
+
+impl IpRouter {
+    pub fn new() -> Self {
+        IpRouter {
+            interfaces: LinkedList::new(),
+        }
+    }
+
+    pub fn register(&mut self, route: IpRoute) {
+        self.interfaces.push_back(route);
+    }
+
+    pub fn route(&self, dst: Ipv4Address) -> Option<Arc<Ipv4Interface>> {
+        for route in self.interfaces.iter() {
+            if dst == route.unicast {
+                return Some(route.interface.clone());
+            }
+        }
+        None
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct IpRoute {
+    unicast: Ipv4Address,
+    pub interface: Arc<Ipv4Interface>,
+}
+
+impl IpRoute {
+    pub fn new(unicast: Ipv4Address, interface: Arc<Ipv4Interface>) -> Self {
+        IpRoute { unicast, interface }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Ipv4IdGenerator {
+    id: u16,
+}
+
+impl Ipv4IdGenerator {
+    pub fn new() -> Self {
+        Ipv4IdGenerator { id: 0 }
+    }
+
+    pub fn next(&mut self) -> u16 {
+        let id = self.id;
+        self.id = self.id.wrapping_add(1);
+        id
+    }
+}
+
+pub fn output(
+    context: &mut NetProtocolContext,
+    data: &[u8],
+    src: Ipv4Address,
+    dst: Ipv4Address,
+) -> anyhow::Result<()> {
+    if src == IPV4_ADDR_ANY {
+        anyhow::bail!("ip routing not implemented");
+    }
+
+    let Some(interface) = context.router.route(src) else {
+        anyhow::bail!("no route found, src: {}", src.to_string());
+    };
+    debug!(
+        "interface unicast: {}, netmask: {}, broadcast: {}, includes: {}",
+        interface.unicast.to_string(),
+        interface.netmask.to_string(),
+        interface.broadcast.to_string(),
+        interface.includes(src),
+    );
+    anyhow::ensure!(
+        interface.includes(dst) || dst == IPV4_ADDR_BROADCAST,
+        "incoming packet not routed properly"
+    );
+
+    let Some(output_device) = interface.device.as_ref() else {
+        anyhow::bail!(
+            "no output device found for {}",
+            interface.unicast.to_string()
+        );
+    };
+    let output_device = output_device.upgrade().unwrap();
+    let mut output_device = output_device.lock().unwrap();
+    if output_device.mtu < data.len() {
+        anyhow::bail!(
+            "packet too long, dev: {}, len: {}, mtu: {}",
+            output_device.name,
+            data.len(),
+            output_device.mtu
+        );
+    }
+
+    let id = context.id_manager.next();
+    let mut output_data = create_ip_header(id, IpProtocolNumber::Icmp, src, dst, data);
+    output_data.extend(data);
+    output_device.transmit(
+        &output_data,
+        output_data.len(),
+        [0xff; crate::devices::NET_DEVICE_ADDR_LEN],
+    )
+}
+
+fn create_ip_header(
+    id: u16,
+    protocol: IpProtocolNumber,
+    src: Ipv4Address,
+    dst: Ipv4Address,
+    data: &[u8],
+) -> Vec<u8> {
+    let total_length = IPV4_HEADER_MIN_LENGTH as u16 + data.len() as u16;
+    let header = Ipv4Header {
+        version_header_length: 0x45, // version 4, header length 20(= 5 * 4) bytes
+        tos: 0,
+        total_length,
+        identification: id,
+        flags_fragment_offset: 0,
+        ttl: 64,
+        protocol: protocol as u8,
+        header_checksum: 0,
+        src,
+        dst,
+    };
+    let mut bytes = header.to_bytes();
+    let checksum = calculate_checksum(&bytes);
+    bytes[10] = (checksum >> 8) as u8;
+    bytes[11] = checksum as u8;
+    bytes
 }
 
 #[cfg(test)]

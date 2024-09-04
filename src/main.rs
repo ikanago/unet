@@ -20,7 +20,7 @@ fn main() {
 
     let (tx, rx) = mpsc::channel();
     let barrier = Arc::new(Barrier::new(2));
-    let app = App::new();
+    let mut app = App::new();
     let app_join = app.run(rx, barrier.clone());
 
     let mut signals = vec![INTR_IRQ_NULL, INTR_IRQ_LOOPBACK, INTR_IRQ_L3];
