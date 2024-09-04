@@ -11,7 +11,10 @@ use signal_hook::low_level::raise;
 
 use crate::{
     interrupt::{IrqEntry, INTR_IRQ_L3},
-    protocols::{ipv4::Ipv4QueueEntry, NetProtocols, ProtocolType},
+    protocols::{
+        ipv4::{Ipv4Interface, Ipv4QueueEntry},
+        NetInterfaceFamily, NetProtocols, ProtocolType,
+    },
 };
 
 pub const NET_DEVICE_TYPE_NULL: u16 = 0x0000;
@@ -80,6 +83,7 @@ pub struct NetDevice {
     pub ops: NetDeviceOps,
     pub irq_entry: IrqEntry,
     pub queue: NetDeviceQueueEntry,
+    pub interfaces: LinkedList<Arc<Ipv4Interface>>,
 }
 
 impl NetDevice {
@@ -122,6 +126,19 @@ impl NetDevice {
         self.flags &= !NET_DEVICE_FLAG_UP;
         info!("closed device, dev: {}, state: {}", self.name, self.state());
         return Ok(());
+    }
+
+    pub fn register_interface(&mut self, interface: Arc<Ipv4Interface>) {
+        self.interfaces.push_back(interface);
+    }
+
+    pub fn get_interface(&self, family: NetInterfaceFamily) -> Option<Arc<Ipv4Interface>> {
+        for interface in self.interfaces.iter() {
+            if interface.family == family {
+                return Some(interface.clone());
+            }
+        }
+        return None;
     }
 
     pub fn transmit(
@@ -172,9 +189,12 @@ impl NetDevice {
 
         for protocol in protocols.iter() {
             if protocol.protocol_type == ProtocolType::Ipv4 {
-                debug!("net protocol queue pushed, protocol",);
                 let mut queue = protocol.queue.lock().unwrap();
-                queue.push_back(Ipv4QueueEntry { data: payload.data });
+                debug!("net protocol queue pushed, len: {}", queue.len());
+                queue.push_back(Ipv4QueueEntry {
+                    data: payload.data,
+                    device: Arc::new(self.clone()),
+                });
                 break;
             }
         }

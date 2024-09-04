@@ -8,7 +8,10 @@ use log::{error, info};
 
 use crate::{
     devices::{run_net, stop_net, NetDevice, NetDevices},
-    protocols::{NetProtocol, NetProtocols},
+    protocols::{
+        ipv4::{Ipv4Address, Ipv4Interface},
+        NetProtocol, NetProtocols,
+    },
 };
 
 pub struct App {
@@ -18,8 +21,14 @@ pub struct App {
 
 impl App {
     pub fn new() -> Self {
+        let interface = Ipv4Interface::new(
+            Ipv4Address::try_from("127.0.0.1").unwrap(),
+            Ipv4Address::try_from("255.0.0.0").unwrap(),
+        );
+        let mut lo = NetDevice::loopback();
+        lo.register_interface(interface.into());
         let mut devices = NetDevices::new();
-        devices.push_back(NetDevice::loopback());
+        devices.push_back(lo);
         run_net(&mut devices).unwrap();
 
         let mut protocols = NetProtocols::new();

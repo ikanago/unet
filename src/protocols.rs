@@ -3,15 +3,21 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use ipv4::{Ipv4Header, Ipv4QueueEntry};
+use ipv4::{Ipv4Header, Ipv4QueueEntry, IPV4_ADDR_BROADCAST};
 use log::debug;
+
+use crate::devices::NetDevice;
 
 pub mod ipv4;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ProtocolType {
     Ipv4 = 0x0800,
-    Unknown,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum NetInterfaceFamily {
+    Ipv4 = 1,
 }
 
 pub type NetProtocols = LinkedList<NetProtocol>;
@@ -27,10 +33,30 @@ impl NetProtocol {
         while let Some(entry) = queue.pop_front() {
             debug!("ipv4 protocol queue popped, len: {}", queue.len());
             debug!("ipv4 protocol queue entry: {:?}", entry);
-            // std::thread::sleep(std::time::Duration::from_millis(500));
-            let header = Ipv4Header::try_from(entry.data.as_ref())?;
-            header.validate()?;
+            self.handle_ipv4_input(&entry.data, &entry.device)?;
         }
+        Ok(())
+    }
+
+    pub fn handle_ipv4_input(&self, data: &[u8], device: &NetDevice) -> anyhow::Result<()> {
+        let header = Ipv4Header::try_from(data.as_ref())?;
+        header.validate()?;
+        let Some(interface) = device.get_interface(NetInterfaceFamily::Ipv4) else {
+            debug!("no ipv4 interface, dev: {}", device.name);
+            return Ok(());
+        };
+        if header.dst != interface.unicast
+            && header.dst != interface.broadcast
+            && header.dst != IPV4_ADDR_BROADCAST
+        {
+            return Ok(());
+        }
+        debug!(
+            "ipv4 packet received, dev: {}, addr:{}, interface: {:?}",
+            device.name,
+            header.dst.to_string(),
+            interface
+        );
         Ok(())
     }
 }

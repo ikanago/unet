@@ -5,15 +5,19 @@ use std::{
 
 use anyhow::ensure;
 
-use super::{NetProtocol, ProtocolType};
+use crate::devices::NetDevice;
+
+use super::{NetInterfaceFamily, NetProtocol, ProtocolType};
 
 const IPV4_HEADER_MIN_LENGTH: u8 = 20;
 const IPV4_HEADER_MAX_LENGTH: u8 = 60;
 const IPV4_VERSION: u8 = 4;
+pub const IPV4_ADDR_BROADCAST: Ipv4Address = Ipv4Address(0xffffffff); // 255.255.255.255
 
 #[derive(Clone, Debug)]
 pub struct Ipv4QueueEntry {
     pub data: Vec<u8>,
+    pub device: Arc<NetDevice>,
 }
 
 impl NetProtocol {
@@ -26,12 +30,12 @@ impl NetProtocol {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Ipv4Address(u32);
+pub struct Ipv4Address(pub u32);
 
-impl TryFrom<String> for Ipv4Address {
+impl TryFrom<&str> for Ipv4Address {
     type Error = anyhow::Error;
 
-    fn try_from(value: String) -> Result<Self, Self::Error> {
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
         let octets: Vec<&str> = value.split('.').collect();
         if octets.len() != 4 {
             anyhow::bail!("invalid ipv4 address: {}", value);
@@ -168,6 +172,26 @@ impl From<&[u8]> for Ipv4Header {
             dst: Ipv4Address(u32::from_be_bytes([
                 value[16], value[17], value[18], value[19],
             ])),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Ipv4Interface {
+    pub family: NetInterfaceFamily,
+    pub unicast: Ipv4Address,
+    pub netmask: Ipv4Address,
+    pub broadcast: Ipv4Address,
+}
+
+impl Ipv4Interface {
+    pub fn new(unicast: Ipv4Address, netmask: Ipv4Address) -> Self {
+        let broadcast = Ipv4Address(unicast.0 & 0xffffff00 | !netmask.0 & 0xff);
+        Ipv4Interface {
+            family: NetInterfaceFamily::Ipv4,
+            unicast,
+            netmask,
+            broadcast,
         }
     }
 }

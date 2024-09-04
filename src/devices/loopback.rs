@@ -87,6 +87,7 @@ impl NetDevice {
             },
             irq_entry,
             queue: NetDeviceQueueEntry::Loopback(Arc::new(Mutex::new(VecDeque::new()))),
+            interfaces: Default::default(),
         }
     }
 }

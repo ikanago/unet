@@ -52,6 +52,7 @@ impl NetDevice {
             },
             irq_entry,
             queue: NetDeviceQueueEntry::Null,
+            interfaces: Default::default(),
         }
     }
 }
