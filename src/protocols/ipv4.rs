@@ -6,7 +6,7 @@ use std::{
 use anyhow::ensure;
 use log::debug;
 
-use crate::devices::NetDevice;
+use crate::{devices::NetDevice, transport::TransportProtocolNumber};
 
 use super::{NetInterfaceFamily, NetProtocol, NetProtocolContext, ProtocolType};
 
@@ -15,10 +15,6 @@ const IPV4_HEADER_MAX_LENGTH: u8 = 60;
 const IPV4_VERSION: u8 = 4;
 pub const IPV4_ADDR_ANY: Ipv4Address = Ipv4Address(0x00000000); // 0.0.0.0
 pub const IPV4_ADDR_BROADCAST: Ipv4Address = Ipv4Address(0xffffffff); // 255.255.255.255
-
-pub enum IpProtocolNumber {
-    Icmp = 1,
-}
 
 #[derive(Clone, Debug)]
 pub struct Ipv4QueueEntry {
@@ -75,7 +71,7 @@ pub struct Ipv4Header {
     pub identification: u16,
     flags_fragment_offset: u16,
     pub ttl: u8,
-    pub protocol: u8,
+    pub protocol: TransportProtocolNumber,
     pub header_checksum: u16,
     pub src: Ipv4Address,
     pub dst: Ipv4Address,
@@ -124,7 +120,7 @@ impl Ipv4Header {
 
     fn validate_checksum(&self) -> anyhow::Result<()> {
         let data = self.to_bytes();
-        let checksum = calculate_checksum(&data);
+        let checksum = crate::utils::calculate_checksum(&data);
         ensure!(checksum == 0, "invalid checksum: 0x{:04x}", checksum);
         Ok(())
     }
@@ -140,7 +136,7 @@ impl Ipv4Header {
             (self.flags_fragment_offset >> 8) as u8,
             self.flags_fragment_offset as u8,
             self.ttl,
-            self.protocol,
+            self.protocol as u8,
             (self.header_checksum >> 8) as u8,
             self.header_checksum as u8,
             (self.src.0 >> 24) as u8,
@@ -155,27 +151,19 @@ impl Ipv4Header {
     }
 }
 
-fn calculate_checksum(data: &[u8]) -> u16 {
-    let mut sum = data
-        .chunks(2)
-        .map(|x| u16::from_be_bytes([x[0], x[1]]) as u32)
-        .sum::<u32>();
-    while sum.checked_shr(16).unwrap_or(0) != 0 {
-        sum = (sum & 0xffff) + sum.checked_shr(16).unwrap_or(0);
-    }
-    !sum as u16
-}
+impl TryFrom<&[u8]> for Ipv4Header {
+    type Error = anyhow::Error;
 
-impl From<&[u8]> for Ipv4Header {
-    fn from(value: &[u8]) -> Self {
-        Ipv4Header {
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        let protocol = TransportProtocolNumber::try_from(value[9])?;
+        Ok(Ipv4Header {
             version_header_length: value[0],
             tos: value[1],
             total_length: u16::from_be_bytes([value[2], value[3]]),
             identification: u16::from_be_bytes([value[4], value[5]]),
             flags_fragment_offset: u16::from_be_bytes([value[6], value[7]]),
             ttl: value[8],
-            protocol: value[9],
+            protocol,
             header_checksum: u16::from_be_bytes([value[10], value[11]]),
             src: Ipv4Address(u32::from_be_bytes([
                 value[12], value[13], value[14], value[15],
@@ -183,7 +171,7 @@ impl From<&[u8]> for Ipv4Header {
             dst: Ipv4Address(u32::from_be_bytes([
                 value[16], value[17], value[18], value[19],
             ])),
-        }
+        })
     }
 }
 
@@ -209,9 +197,6 @@ impl Ipv4Interface {
     }
 
     pub fn includes(&self, unicast: Ipv4Address) -> bool {
-        // output self in binary
-        debug!("netmask: {:032b}", self.netmask.0);
-        debug!("unicast: {:032b}", unicast.0);
         self.netmask.0 & self.unicast.0 == self.netmask.0 & unicast.0
     }
 }
@@ -273,6 +258,7 @@ impl Ipv4IdGenerator {
 
 pub fn output(
     context: &mut NetProtocolContext,
+    protocol: TransportProtocolNumber,
     data: &[u8],
     src: Ipv4Address,
     dst: Ipv4Address,
@@ -284,13 +270,6 @@ pub fn output(
     let Some(interface) = context.router.route(src) else {
         anyhow::bail!("no route found, src: {}", src.to_string());
     };
-    debug!(
-        "interface unicast: {}, netmask: {}, broadcast: {}, includes: {}",
-        interface.unicast.to_string(),
-        interface.netmask.to_string(),
-        interface.broadcast.to_string(),
-        interface.includes(src),
-    );
     anyhow::ensure!(
         interface.includes(dst) || dst == IPV4_ADDR_BROADCAST,
         "incoming packet not routed properly"
@@ -314,8 +293,9 @@ pub fn output(
     }
 
     let id = context.id_manager.next();
-    let mut output_data = create_ip_header(id, IpProtocolNumber::Icmp, src, dst, data);
+    let mut output_data = create_ip_header(id, protocol, src, dst, data);
     output_data.extend(data);
+    debug!("ipv4 packet transmitted, {:?}", output_data);
     output_device.transmit(
         &output_data,
         output_data.len(),
@@ -325,7 +305,7 @@ pub fn output(
 
 fn create_ip_header(
     id: u16,
-    protocol: IpProtocolNumber,
+    protocol: TransportProtocolNumber,
     src: Ipv4Address,
     dst: Ipv4Address,
     data: &[u8],
@@ -338,13 +318,13 @@ fn create_ip_header(
         identification: id,
         flags_fragment_offset: 0,
         ttl: 64,
-        protocol: protocol as u8,
+        protocol,
         header_checksum: 0,
         src,
         dst,
     };
     let mut bytes = header.to_bytes();
-    let checksum = calculate_checksum(&bytes);
+    let checksum = crate::utils::calculate_checksum(&bytes);
     bytes[10] = (checksum >> 8) as u8;
     bytes[11] = checksum as u8;
     bytes

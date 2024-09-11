@@ -9,7 +9,6 @@ use log::{error, info};
 use crate::{
     devices::{run_net, stop_net, NetDevice, NetDevices},
     protocols::{
-        self,
         ipv4::{IpRoute, Ipv4Address, Ipv4Interface},
         NetProtocol, NetProtocolContext, NetProtocols,
     },
@@ -56,8 +55,9 @@ impl App {
         let handle = std::thread::spawn(move || {
             barrier.wait();
             let data = [
-                0x45, 0x00, 0x00, 0x30, 0x00, 0x80, 0x00, 0x00, 0xff, 0x01, 0xbd, 0x4a, 0x7f, 0x00,
-                0x00, 0x01, 0x7f, 0x00, 0x00, 0x01, 0x08, 0x00, 0x35, 0x64, 0x00, 0x80, 0x00, 0x01,
+                /*0x45, 0x00, 0x00, 0x30, 0x00, 0x80, 0x00, 0x00, 0xff, 0x01, 0xbd, 0x4a, 0x7f, 0x00,
+                0x00, 0x01, 0x7f, 0x00, 0x00, 0x01,*/
+                /*0x08, 0x00, 0x35, 0x64, 0x00, 0x80, 0x00, 0x01,*/
                 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0x30, 0x21, 0x40, 0x23, 0x24,
                 0x25, 0x5e, 0x26, 0x2a, 0x28, 0x29,
             ];
@@ -65,7 +65,15 @@ impl App {
             let dst = src.clone();
             while rx.try_recv().is_err() {
                 let mut context = context.lock().unwrap();
-                if let Err(err) = protocols::ipv4::output(&mut context, &data, src, dst) {
+                if let Err(err) = crate::transport::icmp::output(
+                    &mut context,
+                    crate::transport::icmp::IcmpType::Echo,
+                    0,
+                    42,
+                    &data,
+                    src,
+                    dst,
+                ) {
                     log::error!("transmit packet failed: {:?}", err);
                     break;
                 }
@@ -96,8 +104,8 @@ impl App {
     }
 
     pub fn handle_irq_l3(&mut self) {
+        let mut context = self.context.lock().unwrap();
         for protocol in self.protocols.lock().unwrap().iter() {
-            let mut context = self.context.lock().unwrap();
             if let Err(err) = protocol.handle_isr(&mut context) {
                 error!("handle irq failed: {:?}", err);
             }

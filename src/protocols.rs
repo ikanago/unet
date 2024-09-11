@@ -1,16 +1,13 @@
 use std::{
-    borrow::Borrow,
     collections::{LinkedList, VecDeque},
     sync::{Arc, Mutex},
 };
 
-use ipv4::{
-    IpRouter, Ipv4Address, Ipv4Header, Ipv4IdGenerator, Ipv4Interface, Ipv4QueueEntry,
-    IPV4_ADDR_ANY, IPV4_ADDR_BROADCAST,
-};
-use log::{debug, error};
+use crate::transport::TransportProtocolNumber;
+use ipv4::{IpRouter, Ipv4Header, Ipv4IdGenerator, Ipv4QueueEntry, IPV4_ADDR_BROADCAST};
+use log::debug;
 
-use crate::devices::NetDevice;
+use crate::{devices::NetDevice, transport::icmp};
 
 pub mod ipv4;
 
@@ -67,9 +64,19 @@ impl NetProtocol {
             header.dst.to_string(),
             interface
         );
+
+        let payload = &data[header.header_length() as usize..data.len()];
+        match header.protocol {
+            TransportProtocolNumber::Icmp => {
+                icmp::handle_input(context, interface.clone(), payload, header.src, header.dst)?
+            }
+            _ => {
+                debug!("unsupported protocol, protocol: {:?}", header.protocol);
+            }
+        }
+
         Ok(())
     }
-
 }
 
 #[derive(Clone, Debug)]

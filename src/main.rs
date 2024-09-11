@@ -9,6 +9,8 @@ mod app;
 mod devices;
 mod interrupt;
 mod protocols;
+mod transport;
+mod utils;
 
 fn main() {
     env_logger::init();
