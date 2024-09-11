@@ -7,6 +7,7 @@ use signal_hook::{consts::TERM_SIGNALS, iterator::Signals};
 
 mod app;
 mod devices;
+mod driver;
 mod interrupt;
 mod protocols;
 mod transport;

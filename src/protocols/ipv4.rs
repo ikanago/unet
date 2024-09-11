@@ -6,9 +6,12 @@ use std::{
 use anyhow::ensure;
 use log::debug;
 
-use crate::{devices::NetDevice, transport::TransportProtocolNumber};
+use crate::{
+    devices::NetDevice,
+    transport::{icmp, TransportProtocolNumber},
+};
 
-use super::{NetInterfaceFamily, NetProtocol, NetProtocolContext, ProtocolType};
+use super::{NetInterfaceFamily, NetProtocol, NetProtocolContext, NetProtocolType};
 
 const IPV4_HEADER_MIN_LENGTH: u8 = 20;
 const IPV4_HEADER_MAX_LENGTH: u8 = 60;
@@ -19,13 +22,14 @@ pub const IPV4_ADDR_BROADCAST: Ipv4Address = Ipv4Address(0xffffffff); // 255.255
 #[derive(Clone, Debug)]
 pub struct Ipv4QueueEntry {
     pub data: Vec<u8>,
-    pub device: Arc<NetDevice>,
+    // pub device: Arc<NetDevice>,
+    pub interface: Arc<Ipv4Interface>,
 }
 
 impl NetProtocol {
     pub fn ipv4() -> Self {
         NetProtocol {
-            protocol_type: ProtocolType::Ipv4,
+            protocol_type: NetProtocolType::Ipv4,
             queue: Arc::new(Mutex::new(VecDeque::new())),
         }
     }
@@ -282,6 +286,7 @@ pub fn output(
         );
     };
     let output_device = output_device.upgrade().unwrap();
+    debug!("reached here");
     let mut output_device = output_device.lock().unwrap();
     if output_device.mtu < data.len() {
         anyhow::bail!(
@@ -328,6 +333,40 @@ fn create_ip_header(
     bytes[10] = (checksum >> 8) as u8;
     bytes[11] = checksum as u8;
     bytes
+}
+
+pub fn handle_input(
+    interface: Arc<Ipv4Interface>,
+    context: &mut NetProtocolContext,
+    data: &[u8],
+) -> anyhow::Result<()> {
+    let header = Ipv4Header::try_from(data.as_ref())?;
+    header.validate()?;
+    // let Some(interface) = device.get_interface(NetInterfaceFamily::Ipv4) else {
+    //     debug!("no ipv4 interface, dev: {}", device.name);
+    //     return Ok(());
+    // };
+    if header.dst != interface.unicast
+        && header.dst != interface.broadcast
+        && header.dst != IPV4_ADDR_BROADCAST
+    {
+        return Ok(());
+    }
+    debug!(
+        "ipv4 packet received, src:{}, dst: {}, interface: {:?}",
+        header.src.to_string(),
+        header.dst.to_string(),
+        interface
+    );
+
+    let payload = &data[header.header_length() as usize..data.len()];
+    match header.protocol {
+        TransportProtocolNumber::Icmp => {
+            icmp::handle_input(context, interface, payload, header.src, header.dst)?
+        }
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]

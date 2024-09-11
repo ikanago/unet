@@ -12,7 +12,10 @@ impl TryFrom<u8> for TransportProtocolNumber {
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
             1 => Ok(TransportProtocolNumber::Icmp),
-            _ => Err(anyhow::anyhow!("unknown ip protocol number: {}", value)),
+            _ => Err(anyhow::anyhow!(
+                "unknown transport protocol number: {}",
+                value
+            )),
         }
     }
 }

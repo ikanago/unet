@@ -94,8 +94,9 @@ impl App {
         for device in self.devices.lock().unwrap().iter() {
             let device = device.lock().unwrap();
             if device.irq_entry.irq == irq {
+                let mut context = self.context.lock().unwrap();
                 let mut protocols = self.protocols.lock().unwrap();
-                if let Err(err) = device.handle_isr(&mut protocols) {
+                if let Err(err) = device.handle_isr(&mut context, &mut protocols) {
                     error!("handle irq failed: {:?}", err);
                 }
                 break;
@@ -106,7 +107,7 @@ impl App {
     pub fn handle_irq_l3(&mut self) {
         let mut context = self.context.lock().unwrap();
         for protocol in self.protocols.lock().unwrap().iter() {
-            if let Err(err) = protocol.handle_isr(&mut context) {
+            if let Err(err) = protocol.recv(&mut context) {
                 error!("handle irq failed: {:?}", err);
             }
         }

@@ -3,17 +3,37 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use crate::transport::TransportProtocolNumber;
-use ipv4::{IpRouter, Ipv4Header, Ipv4IdGenerator, Ipv4QueueEntry, IPV4_ADDR_BROADCAST};
+use ipv4::{IpRouter, Ipv4IdGenerator, Ipv4QueueEntry};
 use log::debug;
-
-use crate::{devices::NetDevice, transport::icmp};
 
 pub mod ipv4;
 
+#[repr(u16)]
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ProtocolType {
+pub enum NetProtocolType {
     Ipv4 = 0x0800,
+}
+
+impl NetProtocolType {
+    pub fn to_family(&self) -> NetInterfaceFamily {
+        match self {
+            NetProtocolType::Ipv4 => NetInterfaceFamily::Ipv4,
+        }
+    }
+}
+
+impl TryFrom<u16> for NetProtocolType {
+    type Error = anyhow::Error;
+
+    fn try_from(value: u16) -> Result<Self, Self::Error> {
+        match value {
+            0x0800 => Ok(NetProtocolType::Ipv4),
+            _ => Err(anyhow::anyhow!(
+                "unknown network protocol type: 0x{:04x}",
+                value
+            )),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -24,57 +44,19 @@ pub enum NetInterfaceFamily {
 pub type NetProtocols = LinkedList<NetProtocol>;
 
 pub struct NetProtocol {
-    pub protocol_type: ProtocolType,
+    pub protocol_type: NetProtocolType,
+    // TODO: can I remove queue and call handle_isr directly?
     pub queue: Arc<Mutex<VecDeque<Ipv4QueueEntry>>>,
 }
 
 impl NetProtocol {
-    pub fn handle_isr(&self, context: &mut NetProtocolContext) -> anyhow::Result<()> {
+    pub fn recv(&self, context: &mut NetProtocolContext) -> anyhow::Result<()> {
         let mut queue = self.queue.lock().unwrap();
         while let Some(entry) = queue.pop_front() {
             debug!("ipv4 protocol queue popped, len: {}", queue.len());
             debug!("ipv4 protocol queue entry: {:?}", entry);
-            self.handle_ipv4_input(&entry.device, context, &entry.data)?;
+            ipv4::handle_input(entry.interface, context, &entry.data)?;
         }
-        Ok(())
-    }
-
-    pub fn handle_ipv4_input(
-        &self,
-        device: &NetDevice,
-        context: &mut NetProtocolContext,
-        data: &[u8],
-    ) -> anyhow::Result<()> {
-        let header = Ipv4Header::try_from(data.as_ref())?;
-        header.validate()?;
-        let Some(interface) = device.get_interface(NetInterfaceFamily::Ipv4) else {
-            debug!("no ipv4 interface, dev: {}", device.name);
-            return Ok(());
-        };
-        if header.dst != interface.unicast
-            && header.dst != interface.broadcast
-            && header.dst != IPV4_ADDR_BROADCAST
-        {
-            return Ok(());
-        }
-        debug!(
-            "ipv4 packet received, dev: {}, src:{}, dst: {}, interface: {:?}",
-            device.name,
-            header.src.to_string(),
-            header.dst.to_string(),
-            interface
-        );
-
-        let payload = &data[header.header_length() as usize..data.len()];
-        match header.protocol {
-            TransportProtocolNumber::Icmp => {
-                icmp::handle_input(context, interface.clone(), payload, header.src, header.dst)?
-            }
-            _ => {
-                debug!("unsupported protocol, protocol: {:?}", header.protocol);
-            }
-        }
-
         Ok(())
     }
 }

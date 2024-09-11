@@ -1,3 +1,4 @@
+pub mod ethernet;
 pub mod loopback;
 pub mod null;
 
@@ -10,16 +11,13 @@ use log::{debug, info};
 use signal_hook::low_level::raise;
 
 use crate::{
+    driver::DriverType,
     interrupt::{IrqEntry, INTR_IRQ_L3},
     protocols::{
         ipv4::{Ipv4Interface, Ipv4QueueEntry},
-        NetInterfaceFamily, NetProtocols, ProtocolType,
+        NetInterfaceFamily, NetProtocolContext, NetProtocolType, NetProtocols,
     },
 };
-
-pub const NET_DEVICE_TYPE_NULL: u16 = 0x0000;
-pub const NET_DEVICE_TYPE_LOOPBACK: u16 = 0x0001;
-pub const NET_DEVICE_TYPE_ETHERNET: u16 = 0x0002;
 
 const NET_DEVICE_FLAG_UP: u16 = 0x0001;
 pub const NET_DEVICE_FLAG_LOOPBACK: u16 = 0x0010;
@@ -27,7 +25,7 @@ const NET_DEVICE_FLAG_BROADCAST: u16 = 0x0020;
 const NET_DEVICE_FLAG_P2P: u16 = 0x0040;
 const NET_DEVICE_FLAG_NEED_ARP: u16 = 0x0100;
 
-pub const NET_DEVICE_ADDR_LEN: usize = 16;
+pub const NET_DEVICE_ADDR_LEN: usize = 14;
 
 pub fn run_net(devices: &mut NetDevices) -> anyhow::Result<()> {
     info!("open all devices");
@@ -69,9 +67,10 @@ pub enum CastType {
 pub enum NetDeviceType {
     Null,
     Loopback,
+    Ethernet,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct NetDevice {
     pub index: usize,
     pub name: String,
@@ -83,6 +82,7 @@ pub struct NetDevice {
     pub hw_addr: [u8; NET_DEVICE_ADDR_LEN],
     pub cast_type: CastType,
     pub ops: NetDeviceOps,
+    pub driver: Option<DriverType>,
     pub irq_entry: IrqEntry,
     pub queue: NetDeviceQueueEntry,
     pub interfaces: LinkedList<Arc<Ipv4Interface>>,
@@ -168,34 +168,33 @@ impl NetDevice {
         return Ok(());
     }
 
-    pub fn handle_isr(&self, protocols: &mut NetProtocols) -> anyhow::Result<()> {
+    pub fn handle_isr(
+        &self,
+        context: &NetProtocolContext,
+        protocols: &mut NetProtocols,
+    ) -> anyhow::Result<()> {
         debug!(
             "handle interrupt, dev: {}, irq: {}",
             self.name, self.irq_entry.irq
         );
-        let payload = match self.ty {
+        let (protocol, payload) = match self.ty {
             NetDeviceType::Null => {
-                debug!("null device, dev: {}", self.name);
                 return Ok(());
             }
-            NetDeviceType::Loopback => {
-                debug!("loopback device, dev: {}", self.name);
-                loopback::read_data(self)?
-            }
+            NetDeviceType::Loopback => loopback::recv(self)?,
+            NetDeviceType::Ethernet => ethernet::recv(self)?,
         };
 
-        let Some(payload) = payload else {
-            debug!("no payload, dev: {}", self.name);
-            return Ok(());
-        };
-
-        for protocol in protocols.iter() {
-            if protocol.protocol_type == ProtocolType::Ipv4 {
-                let mut queue = protocol.queue.lock().unwrap();
+        for p in protocols.iter() {
+            if p.protocol_type == protocol {
+                let mut queue = p.queue.lock().unwrap();
                 debug!("net protocol queue pushed, len: {}", queue.len());
+                let Some(interface) = self.get_interface(p.protocol_type.to_family()) else {
+                    anyhow::bail!("ipv4 interface not found, dev: {}", self.name);
+                };
                 queue.push_back(Ipv4QueueEntry {
-                    data: payload.data,
-                    device: Arc::new(self.clone()),
+                    data: payload,
+                    interface,
                 });
                 break;
             }

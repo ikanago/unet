@@ -50,6 +50,7 @@ impl NetDevice {
                 close,
                 transmit,
             },
+            driver: None,
             irq_entry,
             queue: NetDeviceQueueEntry::Null,
             interfaces: Default::default(),

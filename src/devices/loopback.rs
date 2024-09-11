@@ -6,7 +6,10 @@ use std::{
 use log::debug;
 use signal_hook::low_level::raise;
 
-use crate::interrupt::{IrqEntry, INTR_IRQ_LOOPBACK};
+use crate::{
+    interrupt::{IrqEntry, INTR_IRQ_LOOPBACK},
+    protocols::NetProtocolType,
+};
 
 use super::{NetDevice, NetDeviceQueueEntry, NET_DEVICE_FLAG_LOOPBACK};
 
@@ -25,7 +28,7 @@ fn close(_: &mut NetDevice) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn transmit(
+fn send(
     dev: &mut NetDevice,
     data: &[u8],
     len: usize,
@@ -49,18 +52,21 @@ fn transmit(
     Ok(())
 }
 
-pub fn read_data(dev: &NetDevice) -> anyhow::Result<Option<LoopbackQueueEntry>> {
+pub fn recv(dev: &NetDevice) -> anyhow::Result<(NetProtocolType, Vec<u8>)> {
     let NetDeviceQueueEntry::Loopback(ref queue) = dev.queue else {
         anyhow::bail!("invalid queue type, expected loopback");
     };
     let mut queue = queue.lock().unwrap();
-    let entry = queue.pop_front();
+    let entry = queue
+        .pop_front()
+        .ok_or(anyhow::anyhow!("loopback queue is empty"))?
+        .data;
     debug!(
         "net device queue popped, dev: {}, len: {}",
         dev.name,
         queue.len()
     );
-    Ok(entry)
+    Ok((NetProtocolType::Ipv4, entry))
 }
 
 impl NetDevice {
@@ -83,8 +89,9 @@ impl NetDevice {
             ops: super::NetDeviceOps {
                 open: open,
                 close: close,
-                transmit: transmit,
+                transmit: send,
             },
+            driver: None,
             irq_entry,
             queue: NetDeviceQueueEntry::Loopback(Arc::new(Mutex::new(VecDeque::new()))),
             interfaces: Default::default(),
