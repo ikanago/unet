@@ -1,7 +1,12 @@
 use core::slice;
-use std::{ffi::CString, fs::OpenOptions, os::fd::AsRawFd};
+use std::{
+    ffi::CString,
+    fs::OpenOptions,
+    io::{Read, Write},
+    os::fd::AsRawFd,
+};
 
-use log::info;
+use log::{debug, info};
 use nix::{
     errno::Errno,
     ioctl_read_bad, ioctl_write_int,
@@ -12,10 +17,20 @@ use nix::{
     sys::socket::{socket, AddressFamily, SockFlag, SockProtocol, SockType},
 };
 
-use crate::devices::{
-    ethernet::{MAC_ADDRESS_ANY, MAC_ADDRESS_SIZE},
-    NetDevice,
+use crate::{
+    devices::{
+        ethernet::{
+            EthernetHeader, MacAddress, ETHERNET_FRAME_MAX_SIZE, ETHERNET_FRAME_MIN_SIZE,
+            ETHERNET_HEADER_SIZE, ETHERNET_PAYLOAD_MAX_SIZE, MAC_ADDRESS_ANY, MAC_ADDRESS_SIZE,
+        },
+        CastType, NetDevice, NetDeviceOps, NetDeviceType, NET_DEVICE_ADDR_LEN,
+        NET_DEVICE_FLAG_LOOPBACK, NET_DEVICE_FLAG_NEED_ARP,
+    },
+    interrupt::{IrqEntry, INTR_IRQ_ETHERNET_TAP},
+    protocols::NetProtocolType,
 };
+
+use super::DriverType;
 
 const TUN_PATH: &str = "/dev/net/tun";
 const F_SETSIG: c_int = 10;
@@ -25,6 +40,10 @@ const F_SETSIG: c_int = 10;
 ioctl_write_int!(tun_set_iff, b'T', 202);
 ioctl_read_bad!(get_hw_addr, 0x8927, ifreq);
 
+fn close(_device: &mut NetDevice) -> anyhow::Result<()> {
+    Ok(())
+}
+
 fn open(device: &mut NetDevice) -> anyhow::Result<()> {
     let file = OpenOptions::new()
         .read(true)
@@ -32,6 +51,8 @@ fn open(device: &mut NetDevice) -> anyhow::Result<()> {
         .open(TUN_PATH)
         .unwrap();
     let fd = file.as_raw_fd();
+    debug!("tap device file metadata: {:?}", file.metadata()?);
+    device.driver = Some(DriverType::Tap { file });
     let ifru_flags = (IFF_TAP | IFF_NO_PI) as c_short;
     let ifreq = ifreq {
         ifr_name: to_ifreq_name(&device.name)?,
@@ -57,7 +78,7 @@ fn open(device: &mut NetDevice) -> anyhow::Result<()> {
             anyhow::bail!("fcntl F_SETSIG failed: {}", Errno::last_raw());
         }
 
-        if device.hw_addr[..MAC_ADDRESS_SIZE] != MAC_ADDRESS_ANY.0 {
+        if device.hw_addr[..MAC_ADDRESS_SIZE] == MAC_ADDRESS_ANY.0 {
             set_tap_address(device)?;
         }
     }
@@ -97,7 +118,7 @@ fn set_tap_address(device: &mut NetDevice) -> anyhow::Result<()> {
         }
         let hw_addr_u8 = slice::from_raw_parts(
             ifreq.ifr_ifru.ifru_hwaddr.sa_data.as_ptr() as *const u8,
-            MAC_ADDRESS_SIZE,
+            NET_DEVICE_ADDR_LEN,
         );
         device.hw_addr.copy_from_slice(hw_addr_u8);
     }
@@ -108,6 +129,76 @@ fn set_tap_address(device: &mut NetDevice) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn read(device: &NetDevice) -> anyhow::Result<Vec<u8>> {
-    Ok(vec![0; 1])
+pub fn send(
+    device: &mut NetDevice,
+    data: &[u8],
+    ty: NetProtocolType,
+    dst: [u8; NET_DEVICE_ADDR_LEN],
+) -> anyhow::Result<()> {
+    let header = EthernetHeader {
+        dst: MacAddress::from(dst[..MAC_ADDRESS_SIZE].as_ref()),
+        src: MacAddress::from(device.hw_addr[..MAC_ADDRESS_SIZE].as_ref()),
+        ty,
+    };
+
+    let mut frame = header.to_bytes();
+    frame.extend_from_slice(data);
+
+    let len_padding = if data.len() < ETHERNET_FRAME_MIN_SIZE {
+        ETHERNET_FRAME_MIN_SIZE - data.len()
+    } else {
+        0
+    };
+    frame.extend_from_slice(&vec![0; len_padding]);
+    if let Some(mut driver) = device.driver.as_mut() {
+        let DriverType::Tap { ref mut file } = &mut driver;
+        file.write_all(&frame)?;
+    }
+
+    debug!(
+        "ethernet frame transmitted, dev: {}, type: 0x{:#04x}, len: {}",
+        device.name,
+        ty as u16,
+        frame.len()
+    );
+
+    Ok(())
+}
+
+pub fn read(device: &mut NetDevice) -> anyhow::Result<Vec<u8>> {
+    let DriverType::Tap { ref mut file } = device.driver.as_mut().expect("device driver not set");
+    let mut buf = [0; ETHERNET_FRAME_MAX_SIZE];
+    file.read(&mut buf)?;
+    Ok(buf.to_vec())
+}
+
+impl NetDevice {
+    pub fn ethernet_tap() -> Self {
+        let irq_entry = IrqEntry {
+            irq: INTR_IRQ_ETHERNET_TAP,
+            flags: 0x00,
+        };
+
+        Self {
+            index: 0,
+            name: "tap0".to_string(),
+            ty: NetDeviceType::Ethernet,
+            mtu: ETHERNET_PAYLOAD_MAX_SIZE,
+            flags: NET_DEVICE_FLAG_LOOPBACK | NET_DEVICE_FLAG_NEED_ARP,
+            header_len: ETHERNET_HEADER_SIZE as u16,
+            addr_len: MAC_ADDRESS_SIZE as u16,
+            hw_addr: [0; NET_DEVICE_ADDR_LEN],
+            // cast_type: CastType::Broadcast(MAC_ADDRESS_BROADCAST),
+            cast_type: CastType::Peer([0; NET_DEVICE_ADDR_LEN]),
+            ops: NetDeviceOps {
+                open,
+                close,
+                transmit: send,
+            },
+            driver: None,
+            irq_entry,
+            queue: crate::devices::NetDeviceQueueEntry::Null,
+            interfaces: std::collections::LinkedList::new(),
+        }
+    }
 }

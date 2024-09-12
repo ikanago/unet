@@ -15,7 +15,7 @@ use crate::{
     interrupt::{IrqEntry, INTR_IRQ_L3},
     protocols::{
         ipv4::{Ipv4Interface, Ipv4QueueEntry},
-        NetInterfaceFamily, NetProtocolContext, NetProtocolType, NetProtocols,
+        NetInterfaceFamily, NetProtocolType, NetProtocols,
     },
 };
 
@@ -23,7 +23,7 @@ const NET_DEVICE_FLAG_UP: u16 = 0x0001;
 pub const NET_DEVICE_FLAG_LOOPBACK: u16 = 0x0010;
 const NET_DEVICE_FLAG_BROADCAST: u16 = 0x0020;
 const NET_DEVICE_FLAG_P2P: u16 = 0x0040;
-const NET_DEVICE_FLAG_NEED_ARP: u16 = 0x0100;
+pub const NET_DEVICE_FLAG_NEED_ARP: u16 = 0x0100;
 
 pub const NET_DEVICE_ADDR_LEN: usize = 14;
 
@@ -146,33 +146,29 @@ impl NetDevice {
     pub fn transmit(
         &mut self,
         data: &[u8],
-        len: usize,
+        ty: NetProtocolType,
         dst: [u8; NET_DEVICE_ADDR_LEN],
     ) -> anyhow::Result<()> {
         if !self.is_up() {
             anyhow::bail!("device not opened, name: {}", self.name);
         }
 
-        if len > self.mtu {
+        if data.len() > self.mtu {
             anyhow::bail!(
                 "too long packet, dev: {}, len: {}, mtu: {}",
                 self.name,
-                len,
+                data.len(),
                 self.mtu
             );
         }
 
-        if let Err(err) = (self.ops.transmit)(self, data, len, dst) {
+        if let Err(err) = (self.ops.transmit)(self, data, ty, dst) {
             return Err(err);
         }
         return Ok(());
     }
 
-    pub fn handle_isr(
-        &self,
-        context: &NetProtocolContext,
-        protocols: &mut NetProtocols,
-    ) -> anyhow::Result<()> {
+    pub fn handle_isr(&mut self, protocols: &mut NetProtocols) -> anyhow::Result<()> {
         debug!(
             "handle interrupt, dev: {}, irq: {}",
             self.name, self.irq_entry.irq
@@ -212,7 +208,7 @@ pub struct NetDeviceOps {
     pub transmit: fn(
         dev: &mut NetDevice,
         data: &[u8],
-        len: usize,
+        ty: NetProtocolType,
         dst: [u8; NET_DEVICE_ADDR_LEN],
     ) -> anyhow::Result<()>,
 }

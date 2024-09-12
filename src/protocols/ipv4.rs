@@ -303,7 +303,7 @@ pub fn output(
     debug!("ipv4 packet transmitted, {:?}", output_data);
     output_device.transmit(
         &output_data,
-        output_data.len(),
+        NetProtocolType::Ipv4,
         [0xff; crate::devices::NET_DEVICE_ADDR_LEN],
     )
 }

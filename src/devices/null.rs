@@ -3,6 +3,7 @@ use signal_hook::consts::SIGUSR1;
 
 use crate::devices::{NetDevice, NetDeviceOps, NET_DEVICE_ADDR_LEN};
 use crate::interrupt::{IrqEntry, INTR_IRQ_SHARED};
+use crate::protocols::NetProtocolType;
 
 use super::NetDeviceQueueEntry;
 
@@ -17,13 +18,10 @@ fn close(_: &mut NetDevice) -> anyhow::Result<()> {
 fn transmit(
     dev: &mut NetDevice,
     data: &[u8],
-    len: usize,
+    _ty: NetProtocolType,
     dst: [u8; NET_DEVICE_ADDR_LEN],
 ) -> anyhow::Result<()> {
-    debug!(
-        "transmit packet, dev: {}, len: {}, dst: {:?}",
-        dev.name, len, dst
-    );
+    debug!("transmit packet, dev: {}, dst: {:?}", dev.name, dst);
     debug!("data: {:?}", data);
     Ok(())
 }

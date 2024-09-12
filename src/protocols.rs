@@ -9,7 +9,7 @@ use log::debug;
 pub mod ipv4;
 
 #[repr(u16)]
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NetProtocolType {
     Ipv4 = 0x0800,
 }

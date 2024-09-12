@@ -8,8 +8,11 @@ use crate::{
 use super::NetDevice;
 
 pub const MAC_ADDRESS_SIZE: usize = 6;
-const ETHERNET_MIN_SIZE: usize = 60; // w/o FCS
-const ETHERNET_HEADER_SIZE: usize = 14;
+pub const ETHERNET_FRAME_MIN_SIZE: usize = 60; // w/o FCS
+pub const ETHERNET_FRAME_MAX_SIZE: usize = 1514; // w/o FCS
+pub const ETHERNET_HEADER_SIZE: usize = 14;
+pub const ETHERNET_PAYLOAD_MIN_SIZE: usize = ETHERNET_FRAME_MIN_SIZE - ETHERNET_HEADER_SIZE;
+pub const ETHERNET_PAYLOAD_MAX_SIZE: usize = ETHERNET_FRAME_MAX_SIZE - ETHERNET_HEADER_SIZE;
 
 pub const MAC_ADDRESS_ANY: MacAddress = MacAddress([0x00; MAC_ADDRESS_SIZE]);
 pub const MAC_ADDRESS_BROADCAST: MacAddress = MacAddress([0xff; MAC_ADDRESS_SIZE]);
@@ -29,64 +32,35 @@ impl From<&[u8]> for MacAddress {
 pub struct EthernetHeader {
     pub dst: MacAddress,
     pub src: MacAddress,
-    pub ty: u16,
+    pub ty: NetProtocolType,
 }
 
 impl EthernetHeader {
-    fn to_bytes(&self) -> Vec<u8> {
+    pub fn to_bytes(&self) -> Vec<u8> {
         let mut bytes = Vec::with_capacity(14);
         bytes.extend_from_slice(&self.dst.0);
         bytes.extend_from_slice(&self.src.0);
-        bytes.extend_from_slice(&self.ty.to_be_bytes());
+        bytes.extend_from_slice(&(self.ty as u16).to_be_bytes());
         bytes
     }
 }
 
-impl From<&[u8]> for EthernetHeader {
-    fn from(value: &[u8]) -> Self {
+impl TryFrom<&[u8]> for EthernetHeader {
+    type Error = anyhow::Error;
+
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
         let dst = MacAddress::from(&value[0..MAC_ADDRESS_SIZE]);
         let src = MacAddress::from(&value[MAC_ADDRESS_SIZE..2 * MAC_ADDRESS_SIZE]);
-        let ethertype = u16::from_be_bytes([value[12], value[13]]);
-        EthernetHeader {
-            dst,
-            src,
-            ty: ethertype,
-        }
+        let ty = NetProtocolType::try_from(u16::from_be_bytes([value[12], value[13]]))?;
+        Ok(EthernetHeader { dst, src, ty })
     }
 }
 
-pub fn send(device: &NetDevice, ty: u16, data: &[u8], dst: MacAddress) -> anyhow::Result<()> {
-    let header = EthernetHeader {
-        dst,
-        src: MacAddress::from(device.hw_addr[..MAC_ADDRESS_SIZE].as_ref()),
-        ty,
-    };
-
-    let mut frame = header.to_bytes();
-    frame.extend_from_slice(data);
-
-    let len_padding = if data.len() < ETHERNET_MIN_SIZE {
-        ETHERNET_MIN_SIZE - data.len()
-    } else {
-        0
-    };
-    frame.extend_from_slice(&vec![0; len_padding]);
-
-    debug!(
-        "ethernet frame transmitted, dev: {}, type: 0x{:#04x}, len: {}",
-        device.name,
-        ty,
-        frame.len()
-    );
-
-    Ok(())
-}
-
-pub fn recv(device: &NetDevice) -> anyhow::Result<(NetProtocolType, Vec<u8>)> {
+pub fn recv(device: &mut NetDevice) -> anyhow::Result<(NetProtocolType, Vec<u8>)> {
     let data = match device.driver.as_ref().expect("device driver not set") {
         DriverType::Tap { .. } => tap::read(device)?,
     };
-    let header = EthernetHeader::from(data.as_ref());
+    let header = EthernetHeader::try_from(data.as_ref())?;
     if header.dst != MacAddress::from(&device.hw_addr[..MAC_ADDRESS_SIZE])
         && header.dst != MAC_ADDRESS_BROADCAST
     {

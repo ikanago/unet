@@ -31,6 +31,16 @@ impl App {
         lo.lock().unwrap().register_interface(interface.clone());
         let mut devices = NetDevices::new();
         devices.push_back(lo);
+
+        let eth = Arc::new(Mutex::new(NetDevice::ethernet_tap()));
+        let interface = Arc::new(Ipv4Interface::new(
+            Ipv4Address::try_from("192.0.2.2").unwrap(),
+            Ipv4Address::try_from("255.255.255.0").unwrap(),
+            eth.clone(),
+        ));
+        eth.lock().unwrap().register_interface(interface.clone());
+        devices.push_back(eth);
+
         run_net(&mut devices).unwrap();
 
         let mut context = NetProtocolContext::new();
@@ -64,20 +74,20 @@ impl App {
             let src = Ipv4Address::try_from("127.0.0.1").unwrap();
             let dst = src.clone();
             while rx.try_recv().is_err() {
-                let mut context = context.lock().unwrap();
-                if let Err(err) = crate::transport::icmp::output(
-                    &mut context,
-                    crate::transport::icmp::IcmpType::Echo,
-                    0,
-                    42,
-                    &data,
-                    src,
-                    dst,
-                ) {
-                    log::error!("transmit packet failed: {:?}", err);
-                    break;
-                }
-                drop(context);
+                // let mut context = context.lock().unwrap();
+                // if let Err(err) = crate::transport::icmp::output(
+                //     &mut context,
+                //     crate::transport::icmp::IcmpType::Echo,
+                //     0,
+                //     42,
+                //     &data,
+                //     src,
+                //     dst,
+                // ) {
+                //     log::error!("transmit packet failed: {:?}", err);
+                //     break;
+                // }
+                // drop(context);
                 sleep(Duration::from_secs(1));
             }
         });
@@ -92,11 +102,10 @@ impl App {
 
     pub fn handle_irq_l2(&self, irq: i32) {
         for device in self.devices.lock().unwrap().iter() {
-            let device = device.lock().unwrap();
+            let mut device = device.lock().unwrap();
             if device.irq_entry.irq == irq {
-                let mut context = self.context.lock().unwrap();
                 let mut protocols = self.protocols.lock().unwrap();
-                if let Err(err) = device.handle_isr(&mut context, &mut protocols) {
+                if let Err(err) = device.handle_isr(&mut protocols) {
                     error!("handle irq failed: {:?}", err);
                 }
                 break;

@@ -1,7 +1,7 @@
 use std::sync::{mpsc, Arc, Barrier};
 
 use app::App;
-use interrupt::{INTR_IRQ_L3, INTR_IRQ_LOOPBACK, INTR_IRQ_NULL};
+use interrupt::{INTR_IRQ_ETHERNET_TAP, INTR_IRQ_L3, INTR_IRQ_LOOPBACK, INTR_IRQ_NULL};
 use log::{debug, error, info};
 use signal_hook::{consts::TERM_SIGNALS, iterator::Signals};
 
@@ -26,7 +26,12 @@ fn main() {
     let mut app = App::new();
     let app_join = app.run(rx, barrier.clone());
 
-    let mut signals = vec![INTR_IRQ_NULL, INTR_IRQ_LOOPBACK, INTR_IRQ_L3];
+    let mut signals = vec![
+        INTR_IRQ_NULL,
+        INTR_IRQ_LOOPBACK,
+        INTR_IRQ_ETHERNET_TAP,
+        INTR_IRQ_L3,
+    ];
     signals.extend(TERM_SIGNALS);
     debug!("signals: {:?}", signals);
     let mut signals = Signals::new(signals).unwrap();
@@ -36,7 +41,7 @@ fn main() {
     for signal in signals.forever() {
         debug!("received signal: {}", signal);
         match signal {
-            INTR_IRQ_NULL | INTR_IRQ_LOOPBACK => app.handle_irq_l2(signal),
+            INTR_IRQ_NULL | INTR_IRQ_LOOPBACK | INTR_IRQ_ETHERNET_TAP => app.handle_irq_l2(signal),
             INTR_IRQ_L3 => app.handle_irq_l3(),
             signal if TERM_SIGNALS.contains(&signal) => {
                 info!("terminating app");

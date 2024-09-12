@@ -31,8 +31,8 @@ fn close(_: &mut NetDevice) -> anyhow::Result<()> {
 fn send(
     dev: &mut NetDevice,
     data: &[u8],
-    len: usize,
-    dst: [u8; super::NET_DEVICE_ADDR_LEN],
+    _ty: NetProtocolType,
+    _dst: [u8; super::NET_DEVICE_ADDR_LEN],
 ) -> anyhow::Result<()> {
     let entry = LoopbackQueueEntry {
         data: data.to_vec(),
