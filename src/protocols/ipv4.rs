@@ -109,7 +109,7 @@ impl Ipv4Header {
     fn validate_checksum(&self) -> anyhow::Result<()> {
         let data = self.to_bytes();
         let checksum = crate::utils::calculate_checksum(&data);
-        ensure!(checksum == 0, "invalid checksum: 0x{:04x}", checksum);
+        ensure!(checksum == 0, "invalid checksum: {:04x}", checksum);
         Ok(())
     }
 
@@ -244,7 +244,8 @@ impl Ipv4IdGenerator {
     }
 }
 
-pub fn output(
+#[tracing::instrument(skip(context, protocol, data))]
+pub fn send(
     context: &mut NetProtocolContext,
     protocol: TransportProtocolNumber,
     data: &[u8],
@@ -284,7 +285,7 @@ pub fn output(
     let mut output_data = create_ip_header(id, protocol, src, dst, data);
     output_data.extend(data);
     debug!("ipv4 packet transmitted, {:?}", output_data);
-    output_device.transmit(
+    output_device.send(
         &output_data,
         NetProtocolType::Ipv4,
         [0xff; crate::devices::NET_DEVICE_ADDR_LEN],
@@ -318,17 +319,14 @@ fn create_ip_header(
     bytes
 }
 
-pub fn handle_input(
+#[tracing::instrument(skip_all)]
+pub fn recv(
     interface: Arc<Ipv4Interface>,
     context: &mut NetProtocolContext,
     data: &[u8],
 ) -> anyhow::Result<()> {
     let header = Ipv4Header::try_from(data.as_ref())?;
     header.validate()?;
-    // let Some(interface) = device.get_interface(NetInterfaceFamily::Ipv4) else {
-    //     debug!("no ipv4 interface, dev: {}", device.name);
-    //     return Ok(());
-    // };
     if header.dst != interface.unicast
         && header.dst != interface.broadcast
         && header.dst != IPV4_ADDR_BROADCAST
@@ -345,7 +343,7 @@ pub fn handle_input(
     let payload = &data[header.header_length() as usize..data.len()];
     match header.protocol {
         TransportProtocolNumber::Icmp => {
-            icmp::handle_input(context, interface, payload, header.src, header.dst)?
+            icmp::recv(context, interface, payload, header.src, header.dst)?
         }
     }
 

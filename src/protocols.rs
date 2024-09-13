@@ -32,7 +32,7 @@ impl TryFrom<u16> for NetProtocolType {
             0x0800 => Ok(NetProtocolType::Ipv4),
             0x0806 => Ok(NetProtocolType::Arp),
             _ => Err(anyhow::anyhow!(
-                "unknown network protocol type: 0x{:04x}",
+                "unknown network protocol type: {:04x}",
                 value
             )),
         }
@@ -76,13 +76,13 @@ impl NetProtocol {
 }
 
 impl NetProtocol {
+    #[tracing::instrument(skip_all)]
     pub fn recv(&self, context: &mut NetProtocolContext) -> anyhow::Result<()> {
         let mut queue = self.queue.lock().unwrap();
-        debug!("net protocol recv, 0x{:04x}", self.protocol_type as u16);
         while let Some(entry) = queue.pop_front() {
             debug!("net protocol queue popped, len: {}", queue.len());
             match self.protocol_type {
-                NetProtocolType::Ipv4 => ipv4::handle_input(entry.interface, context, &entry.data)?,
+                NetProtocolType::Ipv4 => ipv4::recv(entry.interface, context, &entry.data)?,
                 NetProtocolType::Arp => arp::recv(&entry.interface, &entry.data)?,
             }
         }

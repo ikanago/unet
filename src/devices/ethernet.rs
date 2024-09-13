@@ -56,6 +56,7 @@ impl TryFrom<&[u8]> for EthernetHeader {
     }
 }
 
+#[tracing::instrument(skip_all)]
 pub fn recv(device: &mut NetDevice) -> anyhow::Result<(NetProtocolType, Vec<u8>)> {
     let data = match device.driver.as_ref().expect("device driver not set") {
         DriverType::Tap { .. } => tap::read(device)?,

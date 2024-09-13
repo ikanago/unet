@@ -68,39 +68,8 @@ impl TryFrom<&[u8]> for IcmpHeader {
     }
 }
 
-pub fn handle_input(
-    context: &mut NetProtocolContext,
-    interface: Arc<Ipv4Interface>,
-    data: &[u8],
-    src: Ipv4Address,
-    dst: Ipv4Address,
-) -> anyhow::Result<()> {
-    let header = IcmpHeader::try_from(data)?;
-    debug!(
-        "icmp packet received, src: {}, dst: {}, interface: {:?}, header: {:?}",
-        src.to_string(),
-        dst.to_string(),
-        interface,
-        header,
-    );
-    match header.ty {
-        IcmpType::Echo => {
-            output(
-                context,
-                IcmpType::EchoReply,
-                header.code,
-                header.values,
-                &data[8..],
-                dst,
-                src,
-            )?;
-        }
-        _ => {}
-    }
-    Ok(())
-}
-
-pub fn output(
+#[tracing::instrument(skip(context, code, values, data))]
+pub fn send(
     context: &mut NetProtocolContext,
     ty: IcmpType,
     code: u8,
@@ -127,7 +96,39 @@ pub fn output(
         header,
     );
 
-    protocols::ipv4::output(context, TransportProtocolNumber::Icmp, &buffer, src, dst)
+    protocols::ipv4::send(context, TransportProtocolNumber::Icmp, &buffer, src, dst)
+}
+
+#[tracing::instrument(skip(context, interface, data))]
+pub fn recv(
+    context: &mut NetProtocolContext,
+    interface: Arc<Ipv4Interface>,
+    data: &[u8],
+    src: Ipv4Address,
+    dst: Ipv4Address,
+) -> anyhow::Result<()> {
+    let header = IcmpHeader::try_from(data)?;
+    debug!(
+        "icmp packet received, src: {}, dst: {},, header: {:?}",
+        src.to_string(),
+        dst.to_string(),
+        header,
+    );
+    match header.ty {
+        IcmpType::Echo => {
+            send(
+                context,
+                IcmpType::EchoReply,
+                header.code,
+                header.values,
+                &data[8..],
+                dst,
+                src,
+            )?;
+        }
+        _ => {}
+    }
+    Ok(())
 }
 
 #[cfg(test)]

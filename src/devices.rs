@@ -13,7 +13,9 @@ use signal_hook::low_level::raise;
 use crate::{
     driver::DriverType,
     interrupt::{IrqEntry, INTR_IRQ_L3},
-    protocols::{ipv4::Ipv4Interface, Ipv4QueueEntry, NetInterfaceFamily, NetProtocolType, NetProtocols},
+    protocols::{
+        ipv4::Ipv4Interface, Ipv4QueueEntry, NetInterfaceFamily, NetProtocolType, NetProtocols,
+    },
 };
 
 const NET_DEVICE_FLAG_UP: u16 = 0x0001;
@@ -140,7 +142,8 @@ impl NetDevice {
         return None;
     }
 
-    pub fn transmit(
+    #[tracing::instrument(skip(self, data))]
+    pub fn send(
         &mut self,
         data: &[u8],
         ty: NetProtocolType,
@@ -165,11 +168,8 @@ impl NetDevice {
         return Ok(());
     }
 
+    #[tracing::instrument(skip_all)]
     pub fn handle_isr(&mut self, protocols: &mut NetProtocols) -> anyhow::Result<()> {
-        debug!(
-            "handle interrupt, dev: {}, irq: {}",
-            self.name, self.irq_entry.irq
-        );
         let (protocol, payload) = match self.ty {
             NetDeviceType::Null => {
                 return Ok(());
@@ -186,7 +186,6 @@ impl NetDevice {
         for p in protocols.iter() {
             if p.protocol_type == protocol {
                 let mut queue = p.queue.lock().unwrap();
-                debug!("net protocol queue pushed, len: {}", queue.len());
                 let Some(interface) = self.get_interface(p.protocol_type.to_family()) else {
                     anyhow::bail!("ipv4 interface not found, dev: {}", self.name);
                 };
@@ -194,6 +193,7 @@ impl NetDevice {
                     data: payload,
                     interface,
                 });
+                debug!("net protocol queue pushed, len: {}", queue.len());
                 break;
             }
         }

@@ -101,6 +101,7 @@ impl App {
         stop_net(&mut devices).unwrap();
     }
 
+    #[tracing::instrument(skip_all)]
     pub fn handle_irq_l2(&self, irq: i32) {
         for device in self.devices.lock().unwrap().iter() {
             let mut device = device.lock().unwrap();
@@ -114,6 +115,7 @@ impl App {
         }
     }
 
+    #[tracing::instrument(skip_all)]
     pub fn handle_irq_l3(&mut self) {
         let mut context = self.context.lock().unwrap();
         for protocol in self.protocols.lock().unwrap().iter() {

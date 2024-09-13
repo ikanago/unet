@@ -51,7 +51,6 @@ fn open(device: &mut NetDevice) -> anyhow::Result<()> {
         .open(TUN_PATH)
         .unwrap();
     let fd = file.as_raw_fd();
-    debug!("tap device file metadata: {:?}", file.metadata()?);
     device.driver = Some(DriverType::Tap { file });
     let ifru_flags = (IFF_TAP | IFF_NO_PI) as c_short;
     let ifreq = ifreq {
@@ -129,6 +128,7 @@ fn set_tap_address(device: &mut NetDevice) -> anyhow::Result<()> {
     Ok(())
 }
 
+#[tracing::instrument(skip(device, data))]
 pub fn send(
     device: &mut NetDevice,
     data: &[u8],
@@ -156,7 +156,7 @@ pub fn send(
     }
 
     debug!(
-        "ethernet frame transmitted, dev: {}, type: 0x{:#04x}, len: {}",
+        "ethernet frame transmitted, dev: {}, type: {:#04x}, len: {}",
         device.name,
         ty as u16,
         frame.len()

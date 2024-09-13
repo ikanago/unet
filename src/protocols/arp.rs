@@ -93,6 +93,7 @@ impl ArpMessage {
     }
 }
 
+#[tracing::instrument(skip(device, interface))]
 pub fn send(
     device: Arc<Mutex<NetDevice>>,
     interface: &Ipv4Interface,
@@ -120,10 +121,11 @@ pub fn send(
     // Extend target_hw_addr to NET_DEVICE_ADDR_LEN bytes array
     let mut dst = [0; NET_DEVICE_ADDR_LEN];
     dst[..MAC_ADDRESS_SIZE].copy_from_slice(&target_hw_addr);
-    device.transmit(&data, NetProtocolType::Arp, dst)?;
+    device.send(&data, NetProtocolType::Arp, dst)?;
     Ok(())
 }
 
+#[tracing::instrument(skip_all)]
 pub fn recv(interface: &Ipv4Interface, data: &[u8]) -> anyhow::Result<()> {
     let header = ArpHeader::from(&data[0..8]);
     if header.oper != ARP_OPERATION_REQUEST {

@@ -28,6 +28,7 @@ fn close(_: &mut NetDevice) -> anyhow::Result<()> {
     Ok(())
 }
 
+#[tracing::instrument(skip_all)]
 fn send(
     dev: &mut NetDevice,
     data: &[u8],
@@ -52,6 +53,7 @@ fn send(
     Ok(())
 }
 
+#[tracing::instrument(skip_all)]
 pub fn recv(dev: &NetDevice) -> anyhow::Result<(NetProtocolType, Vec<u8>)> {
     let NetDeviceQueueEntry::Loopback(ref queue) = dev.queue else {
         anyhow::bail!("invalid queue type, expected loopback");
