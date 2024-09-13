@@ -51,6 +51,7 @@ impl App {
 
         let mut protocols = NetProtocols::new();
         protocols.push_back(NetProtocol::ipv4());
+        protocols.push_back(NetProtocol::arp());
 
         App {
             devices: Arc::new(Mutex::new(devices)),

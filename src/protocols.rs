@@ -3,21 +3,23 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use ipv4::{IpRouter, Ipv4IdGenerator, Ipv4QueueEntry};
+use ipv4::{IpRouter, Ipv4IdGenerator, Ipv4Interface};
 use log::debug;
 
+pub mod arp;
 pub mod ipv4;
 
 #[repr(u16)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NetProtocolType {
     Ipv4 = 0x0800,
+    Arp = 0x0806,
 }
 
 impl NetProtocolType {
     pub fn to_family(&self) -> NetInterfaceFamily {
         match self {
-            NetProtocolType::Ipv4 => NetInterfaceFamily::Ipv4,
+            NetProtocolType::Ipv4 | NetProtocolType::Arp => NetInterfaceFamily::Ipv4,
         }
     }
 }
@@ -28,6 +30,7 @@ impl TryFrom<u16> for NetProtocolType {
     fn try_from(value: u16) -> Result<Self, Self::Error> {
         match value {
             0x0800 => Ok(NetProtocolType::Ipv4),
+            0x0806 => Ok(NetProtocolType::Arp),
             _ => Err(anyhow::anyhow!(
                 "unknown network protocol type: 0x{:04x}",
                 value
@@ -43,6 +46,13 @@ pub enum NetInterfaceFamily {
 
 pub type NetProtocols = LinkedList<NetProtocol>;
 
+#[derive(Clone, Debug)]
+pub struct Ipv4QueueEntry {
+    pub data: Vec<u8>,
+    // pub device: Arc<NetDevice>,
+    pub interface: Arc<Ipv4Interface>,
+}
+
 pub struct NetProtocol {
     pub protocol_type: NetProtocolType,
     // TODO: can I remove queue and call handle_isr directly?
@@ -50,12 +60,31 @@ pub struct NetProtocol {
 }
 
 impl NetProtocol {
+    pub fn ipv4() -> Self {
+        NetProtocol {
+            protocol_type: NetProtocolType::Ipv4,
+            queue: Arc::new(Mutex::new(VecDeque::new())),
+        }
+    }
+
+    pub fn arp() -> Self {
+        NetProtocol {
+            protocol_type: NetProtocolType::Arp,
+            queue: Arc::new(Mutex::new(VecDeque::new())),
+        }
+    }
+}
+
+impl NetProtocol {
     pub fn recv(&self, context: &mut NetProtocolContext) -> anyhow::Result<()> {
         let mut queue = self.queue.lock().unwrap();
+        debug!("net protocol recv, 0x{:04x}", self.protocol_type as u16);
         while let Some(entry) = queue.pop_front() {
-            debug!("ipv4 protocol queue popped, len: {}", queue.len());
-            debug!("ipv4 protocol queue entry: {:?}", entry);
-            ipv4::handle_input(entry.interface, context, &entry.data)?;
+            debug!("net protocol queue popped, len: {}", queue.len());
+            match self.protocol_type {
+                NetProtocolType::Ipv4 => ipv4::handle_input(entry.interface, context, &entry.data)?,
+                NetProtocolType::Arp => arp::recv(&entry.interface, &entry.data)?,
+            }
         }
         Ok(())
     }

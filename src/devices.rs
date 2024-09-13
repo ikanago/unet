@@ -13,10 +13,7 @@ use signal_hook::low_level::raise;
 use crate::{
     driver::DriverType,
     interrupt::{IrqEntry, INTR_IRQ_L3},
-    protocols::{
-        ipv4::{Ipv4Interface, Ipv4QueueEntry},
-        NetInterfaceFamily, NetProtocolType, NetProtocols,
-    },
+    protocols::{ipv4::Ipv4Interface, Ipv4QueueEntry, NetInterfaceFamily, NetProtocolType, NetProtocols},
 };
 
 const NET_DEVICE_FLAG_UP: u16 = 0x0001;
@@ -180,6 +177,11 @@ impl NetDevice {
             NetDeviceType::Loopback => loopback::recv(self)?,
             NetDeviceType::Ethernet => ethernet::recv(self)?,
         };
+        debug!(
+            "net device recv, protocol: {:?}, len: {}",
+            protocol,
+            payload.len()
+        );
 
         for p in protocols.iter() {
             if p.protocol_type == protocol {

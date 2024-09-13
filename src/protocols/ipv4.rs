@@ -1,5 +1,5 @@
 use std::{
-    collections::{LinkedList, VecDeque},
+    collections::LinkedList,
     sync::{Arc, Mutex, Weak},
 };
 
@@ -11,29 +11,13 @@ use crate::{
     transport::{icmp, TransportProtocolNumber},
 };
 
-use super::{NetInterfaceFamily, NetProtocol, NetProtocolContext, NetProtocolType};
+use super::{NetInterfaceFamily, NetProtocolContext, NetProtocolType};
 
 const IPV4_HEADER_MIN_LENGTH: u8 = 20;
 const IPV4_HEADER_MAX_LENGTH: u8 = 60;
 const IPV4_VERSION: u8 = 4;
 pub const IPV4_ADDR_ANY: Ipv4Address = Ipv4Address(0x00000000); // 0.0.0.0
 pub const IPV4_ADDR_BROADCAST: Ipv4Address = Ipv4Address(0xffffffff); // 255.255.255.255
-
-#[derive(Clone, Debug)]
-pub struct Ipv4QueueEntry {
-    pub data: Vec<u8>,
-    // pub device: Arc<NetDevice>,
-    pub interface: Arc<Ipv4Interface>,
-}
-
-impl NetProtocol {
-    pub fn ipv4() -> Self {
-        NetProtocol {
-            protocol_type: NetProtocolType::Ipv4,
-            queue: Arc::new(Mutex::new(VecDeque::new())),
-        }
-    }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Ipv4Address(pub u32);
@@ -281,12 +265,11 @@ pub fn output(
 
     let Some(output_device) = interface.device.as_ref() else {
         anyhow::bail!(
-            "no output device found for {}",
+            "device not found, interface: {}",
             interface.unicast.to_string()
         );
     };
     let output_device = output_device.upgrade().unwrap();
-    debug!("reached here");
     let mut output_device = output_device.lock().unwrap();
     if output_device.mtu < data.len() {
         anyhow::bail!(
