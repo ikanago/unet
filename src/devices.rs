@@ -15,7 +15,8 @@ use crate::{
     driver::DriverType,
     interrupt::{IrqEntry, INTR_IRQ_L3},
     protocols::{
-        ipv4::Ipv4Interface, Ipv4QueueEntry, NetInterfaceFamily, NetProtocolType, NetProtocols,
+        ipv4::Ipv4Interface, Ipv4QueueEntry, NetInterfaceFamily, NetProtocolContext,
+        NetProtocolType, NetProtocols,
     },
 };
 
@@ -130,7 +131,13 @@ impl NetDevice {
         return Ok(());
     }
 
-    pub fn register_interface(&mut self, interface: Arc<Ipv4Interface>) {
+    pub fn register_interface(
+        &mut self,
+        context: &mut NetProtocolContext,
+        interface: Arc<Ipv4Interface>,
+    ) {
+        let network = interface.unicast & interface.netmask;
+        context.router.register(network, interface.clone());
         self.interfaces.push_back(interface);
     }
 

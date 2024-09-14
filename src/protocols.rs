@@ -4,7 +4,7 @@ use std::{
 };
 
 use arp::ArpCache;
-use ipv4::{IpRouter, Ipv4IdGenerator, Ipv4Interface};
+use ipv4::{Ipv4IdGenerator, Ipv4Interface, Ipv4Router};
 use log::debug;
 
 pub mod arp;
@@ -94,7 +94,7 @@ impl NetProtocol {
 #[derive(Clone, Debug)]
 pub struct NetProtocolContext {
     pub arp_cache: ArpCache,
-    pub router: IpRouter,
+    pub router: Ipv4Router,
     pub id_manager: Ipv4IdGenerator,
 }
 
@@ -102,7 +102,7 @@ impl NetProtocolContext {
     pub fn new() -> Self {
         NetProtocolContext {
             arp_cache: ArpCache::new(),
-            router: IpRouter::new(),
+            router: Ipv4Router::new(),
             id_manager: Ipv4IdGenerator::new(),
         }
     }

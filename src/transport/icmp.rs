@@ -90,29 +90,28 @@ pub fn send(
     buffer[2] = checksum.to_be_bytes()[0];
     buffer[3] = checksum.to_be_bytes()[1];
     debug!(
-        "icmp packet transmitted, src: {}, dst: {}, header: {:?}",
+        "icmp packet transmitted, ty: {:?}, src: {}, dst: {}",
+        header.ty,
         src.to_string(),
         dst.to_string(),
-        header,
     );
 
     protocols::ipv4::send(context, TransportProtocolNumber::Icmp, &buffer, src, dst)
 }
 
-#[tracing::instrument(skip(context, interface, data))]
+#[tracing::instrument(skip(context, data))]
 pub fn recv(
     context: &mut NetProtocolContext,
-    interface: Arc<Ipv4Interface>,
     data: &[u8],
     src: Ipv4Address,
     dst: Ipv4Address,
 ) -> anyhow::Result<()> {
     let header = IcmpHeader::try_from(data)?;
     debug!(
-        "icmp packet received, src: {}, dst: {},, header: {:?}",
+        "icmp packet received, ty: {:?}, src: {}, dst: {}",
+        header.ty,
         src.to_string(),
         dst.to_string(),
-        header,
     );
     match header.ty {
         IcmpType::Echo => {

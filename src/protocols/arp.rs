@@ -265,5 +265,6 @@ pub fn resolve_arp(
     if state == ArpCacheState::Incomplete {
         request(device, interface, target)?;
     }
+    debug!("arp resolved: {:?}", state);
     Ok(state)
 }

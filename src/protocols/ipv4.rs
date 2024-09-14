@@ -3,7 +3,6 @@ use std::{
     sync::{Arc, Mutex, Weak},
 };
 
-use anyhow::ensure;
 use log::debug;
 
 use crate::{
@@ -17,11 +16,34 @@ use super::{NetInterfaceFamily, NetProtocolContext, NetProtocolType};
 const IPV4_HEADER_MIN_LENGTH: u8 = 20;
 const IPV4_HEADER_MAX_LENGTH: u8 = 60;
 const IPV4_VERSION: u8 = 4;
-pub const IPV4_ADDR_ANY: Ipv4Address = Ipv4Address(0x00000000); // 0.0.0.0
-pub const IPV4_ADDR_BROADCAST: Ipv4Address = Ipv4Address(0xffffffff); // 255.255.255.255
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Ipv4Address(pub u32);
+
+impl Ipv4Address {
+    pub const ANY: Ipv4Address = Ipv4Address(0x00000000); // 0.0.0.0
+    pub const BROADCAST: Ipv4Address = Ipv4Address(0xffffffff); // 255.255.255.255
+}
+
+impl std::fmt::Debug for Ipv4Address {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.to_string())
+    }
+}
+
+impl std::ops::BitAnd for Ipv4Address {
+    type Output = Ipv4Address;
+
+    fn bitand(self, rhs: Self) -> Self::Output {
+        Ipv4Address(self.0 & rhs.0)
+    }
+}
+
+impl From<&[u8; 4]> for Ipv4Address {
+    fn from(value: &[u8; 4]) -> Self {
+        Ipv4Address(u32::from_be_bytes([value[0], value[1], value[2], value[3]]))
+    }
+}
 
 impl TryFrom<&str> for Ipv4Address {
     type Error = anyhow::Error;
@@ -84,17 +106,17 @@ impl Ipv4Header {
     }
 
     pub fn validate(&self) -> anyhow::Result<()> {
-        ensure!(
+        anyhow::ensure!(
             self.version() == IPV4_VERSION,
             "invalid version: {}",
             self.version()
         );
-        ensure!(
+        anyhow::ensure!(
             self.header_length() >= IPV4_HEADER_MIN_LENGTH,
             "ipv4 header too short: {}",
             self.header_length()
         );
-        ensure!(
+        anyhow::ensure!(
             self.header_length() < IPV4_HEADER_MAX_LENGTH,
             "ipv4 header too long: {}",
             self.header_length()
@@ -110,7 +132,7 @@ impl Ipv4Header {
     fn validate_checksum(&self) -> anyhow::Result<()> {
         let data = self.to_bytes();
         let checksum = crate::utils::calculate_checksum(&data);
-        ensure!(checksum == 0, "invalid checksum: {:04x}", checksum);
+        anyhow::ensure!(checksum == 0, "invalid checksum: {:04x}", checksum);
         Ok(())
     }
 
@@ -184,48 +206,57 @@ impl Ipv4Interface {
             device: Some(Arc::downgrade(&device)),
         }
     }
-
-    pub fn includes(&self, unicast: Ipv4Address) -> bool {
-        self.netmask.0 & self.unicast.0 == self.netmask.0 & unicast.0
-    }
 }
 
 #[derive(Clone, Debug)]
-pub struct IpRouter {
-    pub interfaces: LinkedList<IpRoute>,
+pub struct Ipv4Router {
+    interfaces: LinkedList<IpRoute>,
 }
 
-impl IpRouter {
+impl Ipv4Router {
     pub fn new() -> Self {
-        IpRouter {
+        Ipv4Router {
             interfaces: LinkedList::new(),
         }
     }
 
-    pub fn register(&mut self, route: IpRoute) {
-        self.interfaces.push_back(route);
+    pub fn register(&mut self, network: Ipv4Address, interface: Arc<Ipv4Interface>) {
+        self.interfaces.push_back(IpRoute {
+            network,
+            netmask: interface.netmask,
+            interface,
+            next_hop: None,
+        });
     }
 
-    pub fn route(&self, dst: Ipv4Address) -> Option<Arc<Ipv4Interface>> {
+    pub fn register_default(&mut self, interface: Arc<Ipv4Interface>, gateway: Ipv4Address) {
+        self.interfaces.push_front(IpRoute {
+            network: Ipv4Address::ANY,
+            netmask: Ipv4Address::ANY,
+            interface,
+            next_hop: Some(gateway),
+        });
+    }
+
+    fn lookup(&self, dst: Ipv4Address) -> Option<IpRoute> {
+        let mut candidate: Option<&IpRoute> = None;
         for route in self.interfaces.iter() {
-            if dst == route.unicast {
-                return Some(route.interface.clone());
+            if dst & route.netmask == route.network {
+                if candidate.is_none() || route.netmask.0 > candidate.as_ref().unwrap().netmask.0 {
+                    candidate = Some(route);
+                }
             }
         }
-        None
+        candidate.cloned()
     }
 }
 
 #[derive(Clone, Debug)]
-pub struct IpRoute {
-    unicast: Ipv4Address,
-    pub interface: Arc<Ipv4Interface>,
-}
-
-impl IpRoute {
-    pub fn new(unicast: Ipv4Address, interface: Arc<Ipv4Interface>) -> Self {
-        IpRoute { unicast, interface }
-    }
+struct IpRoute {
+    network: Ipv4Address,
+    netmask: Ipv4Address,
+    interface: Arc<Ipv4Interface>,
+    next_hop: Option<Ipv4Address>,
 }
 
 #[derive(Clone, Debug)]
@@ -253,18 +284,10 @@ pub fn send(
     src: Ipv4Address,
     dst: Ipv4Address,
 ) -> anyhow::Result<()> {
-    if src == IPV4_ADDR_ANY {
-        anyhow::bail!("ip routing not implemented");
-    }
-
-    let Some(interface) = context.router.route(dst) else {
+    let Some(route) = context.router.lookup(dst) else {
         anyhow::bail!("no route found, dst: {}", dst.to_string());
     };
-    anyhow::ensure!(
-        interface.includes(dst) || dst == IPV4_ADDR_BROADCAST,
-        "incoming packet not routed properly"
-    );
-
+    let interface = route.interface;
     let Some(device) = interface.device.as_ref() else {
         anyhow::bail!(
             "device not found, interface: {}",
@@ -273,31 +296,47 @@ pub fn send(
     };
     let device = device.upgrade().unwrap();
     let mut device = device.lock().unwrap();
-    if device.mtu < data.len() {
-        anyhow::bail!(
-            "packet too long, dev: {}, len: {}, mtu: {}",
-            device.name,
-            data.len(),
-            device.mtu
-        );
-    }
+
+    anyhow::ensure!(
+        src != Ipv4Address::ANY || dst != Ipv4Address::BROADCAST,
+        "source address is required for broadcast packet"
+    );
+    anyhow::ensure!(
+        src == Ipv4Address::ANY || src == interface.unicast,
+        "unable to send packet with the source address, src: {}, interface: {}",
+        src.to_string(),
+        interface.unicast.to_string()
+    );
+    anyhow::ensure!(
+        data.len() < device.mtu,
+        "packet too long, len: {}, mtu: {}",
+        data.len(),
+        device.mtu
+    );
 
     let id = context.id_manager.next();
-    let mut output_data = create_ip_header(id, protocol, src, dst, data);
+    let mut output_data = create_ip_header(id, protocol, interface.unicast, dst, data);
     output_data.extend(data);
 
     let dst_hw_address = if device.flags & NET_DEVICE_FLAG_NEED_ARP != 0 {
-        // // Handle broadcast address
-        // if dst == interface.broadcast || dst == IPV4_ADDR_BROADCAST {
-        //     device.
-        // } else {
-        let ArpCacheState::Resolved(hw_address) =
-            resolve_arp(&mut device, &interface, &mut context.arp_cache, dst)?
-        else {
-            debug!("no arp cache hit, dst: {}", dst.to_string());
-            return Ok(());
-        };
-        hw_address
+        // Handle broadcast address
+        if dst == interface.broadcast || dst == Ipv4Address::BROADCAST {
+            MAC_ADDRESS_BROADCAST
+        } else {
+            // For example, packet to default gateway, destination IPv4 address and next hop IPv4 address are different.
+            let next_hop = if let Some(next_hop) = route.next_hop {
+                next_hop
+            } else {
+                dst
+            };
+            let ArpCacheState::Resolved(hw_address) =
+                resolve_arp(&mut device, &interface, &mut context.arp_cache, next_hop)?
+            else {
+                debug!("no arp cache hit, dst: {}", next_hop.to_string());
+                return Ok(());
+            };
+            hw_address
+        }
     } else {
         MAC_ADDRESS_BROADCAST
     };
@@ -341,7 +380,7 @@ pub fn recv(
     header.validate()?;
     if header.dst != interface.unicast
         && header.dst != interface.broadcast
-        && header.dst != IPV4_ADDR_BROADCAST
+        && header.dst != Ipv4Address::BROADCAST
     {
         return Ok(());
     }
@@ -355,7 +394,7 @@ pub fn recv(
     let payload = &data[header.header_length() as usize..data.len()];
     match header.protocol {
         TransportProtocolNumber::Icmp => {
-            icmp::recv(context, interface, payload, header.src, header.dst)?
+            icmp::recv(context, payload, header.src, header.dst)?
         }
     }
 
@@ -376,5 +415,58 @@ mod tests {
         ];
         let header = Ipv4Header::try_from(data.as_ref()).unwrap();
         assert!(header.validate().is_ok());
+    }
+
+    #[test]
+    fn test_match_lookup() {
+        let mut router = Ipv4Router::new();
+        let interface = Arc::new(Ipv4Interface::new(
+            Ipv4Address::try_from("192.0.0.1").unwrap(),
+            Ipv4Address::try_from("255.0.0.0").unwrap(),
+            Arc::new(Mutex::new(NetDevice::null())),
+        ));
+        router.register(
+            Ipv4Address::try_from("192.0.0.0").unwrap(),
+            interface.clone(),
+        );
+        let dst = Ipv4Address::try_from("192.0.0.2").unwrap();
+        assert_eq!(
+            router.lookup(dst).unwrap().interface.unicast,
+            interface.unicast
+        );
+    }
+
+    #[test]
+    fn test_match_lookup_longest() {
+        let mut router = Ipv4Router::new();
+        let eth0 = Arc::new(Ipv4Interface::new(
+            Ipv4Address::try_from("192.0.0.1").unwrap(),
+            Ipv4Address::try_from("255.0.0.0").unwrap(),
+            Arc::new(Mutex::new(NetDevice::null())),
+        ));
+        router.register(Ipv4Address::try_from("192.0.0.0").unwrap(), eth0.clone());
+        let eth1 = Arc::new(Ipv4Interface::new(
+            Ipv4Address::try_from("192.0.1.1").unwrap(),
+            Ipv4Address::try_from("255.255.0.0").unwrap(),
+            Arc::new(Mutex::new(NetDevice::null())),
+        ));
+        router.register(Ipv4Address::try_from("192.0.0.0").unwrap(), eth1.clone());
+        let dst = Ipv4Address::try_from("192.0.1.2").unwrap();
+        assert_eq!(router.lookup(dst).unwrap().interface.unicast, eth1.unicast);
+    }
+
+    #[test]
+    fn test_match_lookup_default() {
+        let mut router = Ipv4Router::new();
+        let eth0 = Arc::new(Ipv4Interface::new(
+            Ipv4Address::try_from("192.0.0.1").unwrap(),
+            Ipv4Address::try_from("255.255.0.0").unwrap(),
+            Arc::new(Mutex::new(NetDevice::null())),
+        ));
+        let gateway = Ipv4Address::from(&[192, 0, 0, 1]);
+        router.register(Ipv4Address::from(&[192, 0, 0, 0]), eth0.clone());
+        router.register_default(eth0, gateway);
+        let dst = Ipv4Address::from(&[8, 8, 8, 8]);
+        assert_eq!(router.lookup(dst).unwrap().interface.unicast, gateway);
     }
 }
