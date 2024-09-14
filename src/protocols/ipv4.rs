@@ -7,9 +7,7 @@ use anyhow::ensure;
 use log::debug;
 
 use crate::{
-    devices::{
-        ethernet::MAC_ADDRESS_LEN, NetDevice, NET_DEVICE_ADDR_LEN, NET_DEVICE_FLAG_NEED_ARP,
-    },
+    devices::{ethernet::MAC_ADDRESS_BROADCAST, NetDevice, NET_DEVICE_FLAG_NEED_ARP},
     protocols::arp::resolve_arp,
     transport::{icmp, TransportProtocolNumber},
 };
@@ -288,17 +286,15 @@ pub fn send(
     let mut output_data = create_ip_header(id, protocol, src, dst, data);
     output_data.extend(data);
 
-    let hw_address = if device.flags & NET_DEVICE_FLAG_NEED_ARP != 0 {
+    let dst_hw_address = if device.flags & NET_DEVICE_FLAG_NEED_ARP != 0 {
         // // Handle broadcast address
         // if dst == interface.broadcast || dst == IPV4_ADDR_BROADCAST {
         //     device.
         // } else {
         resolve_arp(&device, &mut context.arp_cache, dst)?
     } else {
-        [0x00; MAC_ADDRESS_LEN]
+        MAC_ADDRESS_BROADCAST
     };
-    let mut dst_hw_address = [0; NET_DEVICE_ADDR_LEN];
-    dst_hw_address[..MAC_ADDRESS_LEN].copy_from_slice(&hw_address);
     device.send(&output_data, NetProtocolType::Ipv4, dst_hw_address)
 }
 

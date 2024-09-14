@@ -1,5 +1,3 @@
-use log::debug;
-
 use crate::{
     driver::{tap, DriverType},
     protocols::NetProtocolType,
@@ -17,7 +15,7 @@ pub const ETHERNET_PAYLOAD_MAX_SIZE: usize = ETHERNET_FRAME_MAX_SIZE - ETHERNET_
 pub const MAC_ADDRESS_ANY: MacAddress = MacAddress([0x00; MAC_ADDRESS_LEN]);
 pub const MAC_ADDRESS_BROADCAST: MacAddress = MacAddress([0xff; MAC_ADDRESS_LEN]);
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct MacAddress(pub [u8; MAC_ADDRESS_LEN]);
 
 impl From<&[u8]> for MacAddress {

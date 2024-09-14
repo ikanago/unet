@@ -5,6 +5,7 @@ use crate::devices::{NetDevice, NetDeviceOps, NET_DEVICE_ADDR_LEN};
 use crate::interrupt::{IrqEntry, INTR_IRQ_SHARED};
 use crate::protocols::NetProtocolType;
 
+use super::ethernet::MacAddress;
 use super::NetDeviceQueueEntry;
 
 fn open(_: &mut NetDevice) -> anyhow::Result<()> {
@@ -19,7 +20,7 @@ fn transmit(
     dev: &mut NetDevice,
     data: &[u8],
     _ty: NetProtocolType,
-    dst: [u8; NET_DEVICE_ADDR_LEN],
+    dst: MacAddress,
 ) -> anyhow::Result<()> {
     debug!("transmit packet, dev: {}, dst: {:?}", dev.name, dst);
     debug!("data: {:?}", data);
@@ -46,7 +47,7 @@ impl NetDevice {
             ops: NetDeviceOps {
                 open,
                 close,
-                transmit,
+                send: transmit,
             },
             driver: None,
             irq_entry,

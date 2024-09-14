@@ -133,10 +133,10 @@ pub fn send(
     device: &mut NetDevice,
     data: &[u8],
     ty: NetProtocolType,
-    dst: [u8; NET_DEVICE_ADDR_LEN],
+    dst: MacAddress,
 ) -> anyhow::Result<()> {
     let header = EthernetHeader {
-        dst: MacAddress::from(dst[..MAC_ADDRESS_LEN].as_ref()),
+        dst,
         src: MacAddress::from(device.hw_addr[..MAC_ADDRESS_LEN].as_ref()),
         ty,
     };
@@ -190,11 +190,7 @@ impl NetDevice {
             hw_addr: [0; NET_DEVICE_ADDR_LEN],
             // cast_type: CastType::Broadcast(MAC_ADDRESS_BROADCAST),
             cast_type: CastType::Peer([0; NET_DEVICE_ADDR_LEN]),
-            ops: NetDeviceOps {
-                open,
-                close,
-                transmit: send,
-            },
+            ops: NetDeviceOps { open, close, send },
             driver: None,
             irq_entry,
             queue: crate::devices::NetDeviceQueueEntry::Null,

@@ -7,6 +7,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+use ethernet::MacAddress;
 use log::{debug, info};
 use signal_hook::low_level::raise;
 
@@ -147,7 +148,7 @@ impl NetDevice {
         &mut self,
         data: &[u8],
         ty: NetProtocolType,
-        dst: [u8; NET_DEVICE_ADDR_LEN],
+        dst: MacAddress,
     ) -> anyhow::Result<()> {
         if !self.is_up() {
             anyhow::bail!("device not opened, name: {}", self.name);
@@ -162,7 +163,7 @@ impl NetDevice {
             );
         }
 
-        if let Err(err) = (self.ops.transmit)(self, data, ty, dst) {
+        if let Err(err) = (self.ops.send)(self, data, ty, dst) {
             return Err(err);
         }
         return Ok(());
@@ -207,11 +208,11 @@ impl NetDevice {
 pub struct NetDeviceOps {
     pub open: fn(dev: &mut NetDevice) -> anyhow::Result<()>,
     pub close: fn(dev: &mut NetDevice) -> anyhow::Result<()>,
-    pub transmit: fn(
+    pub send: fn(
         dev: &mut NetDevice,
         data: &[u8],
         ty: NetProtocolType,
-        dst: [u8; NET_DEVICE_ADDR_LEN],
+        dst: MacAddress,
     ) -> anyhow::Result<()>,
 }
 

@@ -11,7 +11,7 @@ use crate::{
     protocols::NetProtocolType,
 };
 
-use super::{NetDevice, NetDeviceQueueEntry, NET_DEVICE_FLAG_LOOPBACK};
+use super::{ethernet::MacAddress, NetDevice, NetDeviceQueueEntry, NET_DEVICE_FLAG_LOOPBACK};
 
 pub const LOOPBACK_MTU: usize = u16::MAX as usize;
 
@@ -33,7 +33,7 @@ fn send(
     dev: &mut NetDevice,
     data: &[u8],
     _ty: NetProtocolType,
-    _dst: [u8; super::NET_DEVICE_ADDR_LEN],
+    _dst: MacAddress,
 ) -> anyhow::Result<()> {
     let entry = LoopbackQueueEntry {
         data: data.to_vec(),
@@ -91,7 +91,7 @@ impl NetDevice {
             ops: super::NetDeviceOps {
                 open: open,
                 close: close,
-                transmit: send,
+                send,
             },
             driver: None,
             irq_entry,
