@@ -190,7 +190,7 @@ fn send(
     };
     let messeage = ArpMessage {
         header,
-        sha: device.hw_addr[0..MAC_ADDRESS_LEN].try_into().unwrap(),
+        sha: device.hw_addr[0..MAC_ADDRESS_LEN].into(),
         spa: interface.unicast,
         tha: target_hw_addr.clone(),
         tpa: target,
@@ -241,7 +241,7 @@ pub fn recv(
             .insert(arp.spa, ArpCacheState::Resolved(arp.sha.clone()));
         let device = device.upgrade().unwrap();
         let mut device = device.lock().unwrap();
-        reply(&mut device, &interface, arp.sha, arp.spa)?;
+        reply(&mut device, interface, arp.sha, arp.spa)?;
     }
     Ok(())
 }

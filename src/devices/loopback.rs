@@ -89,8 +89,8 @@ impl NetDevice {
             hw_addr: [0; super::NET_DEVICE_ADDR_LEN],
             cast_type: super::CastType::Peer([0; super::NET_DEVICE_ADDR_LEN]),
             ops: super::NetDeviceOps {
-                open: open,
-                close: close,
+                open,
+                close,
                 send,
             },
             driver: None,

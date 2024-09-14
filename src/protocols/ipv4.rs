@@ -25,12 +25,6 @@ impl Ipv4Address {
     pub const BROADCAST: Ipv4Address = Ipv4Address(0xffffffff); // 255.255.255.255
 }
 
-impl std::fmt::Debug for Ipv4Address {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.to_string())
-    }
-}
-
 impl std::ops::BitAnd for Ipv4Address {
     type Output = Ipv4Address;
 
@@ -62,15 +56,21 @@ impl TryFrom<&str> for Ipv4Address {
     }
 }
 
-impl ToString for Ipv4Address {
-    fn to_string(&self) -> String {
+impl std::fmt::Debug for Ipv4Address {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self)
+    }
+}
+
+impl std::fmt::Display for Ipv4Address {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let octets = [
             (self.0 >> 24) & 0xff,
             (self.0 >> 16) & 0xff,
             (self.0 >> 8) & 0xff,
             self.0 & 0xff,
         ];
-        format!("{}.{}.{}.{}", octets[0], octets[1], octets[2], octets[3])
+        write!(f, "{}.{}.{}.{}", octets[0], octets[1], octets[2], octets[3])
     }
 }
 
@@ -241,10 +241,10 @@ impl Ipv4Router {
     fn lookup(&self, dst: Ipv4Address) -> Option<IpRoute> {
         let mut candidate: Option<&IpRoute> = None;
         for route in self.interfaces.iter() {
-            if dst & route.netmask == route.network {
-                if candidate.is_none() || route.netmask.0 > candidate.as_ref().unwrap().netmask.0 {
-                    candidate = Some(route);
-                }
+            if dst & route.netmask == route.network
+                && (candidate.is_none() || route.netmask.0 > candidate.as_ref().unwrap().netmask.0)
+            {
+                candidate = Some(route);
             }
         }
         candidate.cloned()
@@ -376,7 +376,7 @@ pub fn recv(
     interface: Arc<Ipv4Interface>,
     data: &[u8],
 ) -> anyhow::Result<()> {
-    let header = Ipv4Header::try_from(data.as_ref())?;
+    let header = Ipv4Header::try_from(data)?;
     header.validate()?;
     if header.dst != interface.unicast
         && header.dst != interface.broadcast
@@ -393,9 +393,7 @@ pub fn recv(
 
     let payload = &data[header.header_length() as usize..data.len()];
     match header.protocol {
-        TransportProtocolNumber::Icmp => {
-            icmp::recv(context, payload, header.src, header.dst)?
-        }
+        TransportProtocolNumber::Icmp => icmp::recv(context, payload, header.src, header.dst)?,
     }
 
     Ok(())

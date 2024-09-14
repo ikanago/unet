@@ -34,7 +34,7 @@ pub fn run_net(devices: &mut NetDevices) -> anyhow::Result<()> {
         let mut dev = dev.lock().unwrap();
         dev.open()?;
     }
-    return Ok(());
+    Ok(())
 }
 
 pub fn stop_net(devices: &mut NetDevices) -> anyhow::Result<()> {
@@ -43,7 +43,7 @@ pub fn stop_net(devices: &mut NetDevices) -> anyhow::Result<()> {
         let mut dev = dev.lock().unwrap();
         dev.close()?;
     }
-    return Ok(());
+    Ok(())
 }
 
 pub fn init_net() -> anyhow::Result<()> {
@@ -96,13 +96,11 @@ impl NetDevice {
             anyhow::bail!("device is already up, dev: {}", self.name);
         }
 
-        if let Err(err) = (self.ops.open)(self) {
-            return Err(err);
-        }
+        (self.ops.open)(self)?;
 
         self.flags |= NET_DEVICE_FLAG_UP;
         info!("opened device, dev: {}, state: {}", self.name, self.state());
-        return Ok(());
+        Ok(())
     }
 
     fn is_up(&self) -> bool {
@@ -122,13 +120,11 @@ impl NetDevice {
             anyhow::bail!("device is already down, dev: {}", self.name);
         }
 
-        if let Err(err) = (self.ops.close)(self) {
-            return Err(err);
-        }
+        (self.ops.close)(self)?;
 
         self.flags &= !NET_DEVICE_FLAG_UP;
         info!("closed device, dev: {}, state: {}", self.name, self.state());
-        return Ok(());
+        Ok(())
     }
 
     pub fn register_interface(
@@ -147,7 +143,7 @@ impl NetDevice {
                 return Some(interface.clone());
             }
         }
-        return None;
+        None
     }
 
     #[tracing::instrument(skip(self, data))]
@@ -170,10 +166,7 @@ impl NetDevice {
             );
         }
 
-        if let Err(err) = (self.ops.send)(self, data, ty, dst) {
-            return Err(err);
-        }
-        return Ok(());
+        (self.ops.send)(self, data, ty, dst)
     }
 
     #[tracing::instrument(skip_all)]

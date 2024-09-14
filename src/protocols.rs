@@ -18,7 +18,7 @@ pub enum NetProtocolType {
 }
 
 impl NetProtocolType {
-    pub fn to_family(&self) -> NetInterfaceFamily {
+    pub fn to_family(self) -> NetInterfaceFamily {
         match self {
             NetProtocolType::Ipv4 | NetProtocolType::Arp => NetInterfaceFamily::Ipv4,
         }

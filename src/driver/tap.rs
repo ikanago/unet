@@ -168,8 +168,8 @@ pub fn send(
 pub fn read(device: &mut NetDevice) -> anyhow::Result<Vec<u8>> {
     let DriverType::Tap { ref mut file } = device.driver.as_mut().expect("device driver not set");
     let mut buf = [0; ETHERNET_FRAME_MAX_SIZE];
-    file.read(&mut buf)?;
-    Ok(buf.to_vec())
+    let n = file.read(&mut buf)?;
+    Ok(buf[..n].to_vec())
 }
 
 impl NetDevice {

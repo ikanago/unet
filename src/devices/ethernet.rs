@@ -70,11 +70,6 @@ pub fn recv(device: &mut NetDevice) -> anyhow::Result<(NetProtocolType, Vec<u8>)
         );
     }
 
-    let ty = NetProtocolType::try_from(header.ty)?;
     let payload = data[ETHERNET_HEADER_SIZE..].to_vec();
-    // debug!(
-    //     "ethernet frame received, dev: {}, ty: {:?}, data: {:?}",
-    //     device.name, ty, data
-    // );
-    Ok((ty, payload))
+    Ok((header.ty, payload))
 }

@@ -113,19 +113,16 @@ pub fn recv(
         src.to_string(),
         dst.to_string(),
     );
-    match header.ty {
-        IcmpType::Echo => {
-            send(
-                context,
-                IcmpType::EchoReply,
-                header.code,
-                header.values,
-                &data[8..],
-                dst,
-                src,
-            )?;
-        }
-        _ => {}
+    if header.ty == IcmpType::Echo {
+        send(
+            context,
+            IcmpType::EchoReply,
+            header.code,
+            header.values,
+            &data[8..],
+            dst,
+            src,
+        )?;
     }
     Ok(())
 }

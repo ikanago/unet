@@ -68,7 +68,7 @@ impl App {
     pub fn run(&self, rx: mpsc::Receiver<()>, barrier: Arc<Barrier>) -> JoinHandle<()> {
         info!("running app");
         let context = self.context.clone();
-        let handle = std::thread::spawn(move || {
+        std::thread::spawn(move || {
             barrier.wait();
             let data = [
                 /*0x45, 0x00, 0x00, 0x30, 0x00, 0x80, 0x00, 0x00, 0xff, 0x01, 0xbd, 0x4a, 0x7f, 0x00,
@@ -100,8 +100,7 @@ impl App {
                 drop(context);
                 sleep(Duration::from_secs(1));
             }
-        });
-        handle
+        })
     }
 
     pub fn stop(&self) {
