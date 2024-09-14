@@ -62,7 +62,7 @@ pub enum CastType {
     Broadcast([u8; NET_DEVICE_ADDR_LEN]),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NetDeviceType {
     Null,
     Loopback,

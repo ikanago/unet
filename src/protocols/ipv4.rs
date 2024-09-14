@@ -7,7 +7,10 @@ use anyhow::ensure;
 use log::debug;
 
 use crate::{
-    devices::NetDevice,
+    devices::{
+        ethernet::MAC_ADDRESS_LEN, NetDevice, NET_DEVICE_ADDR_LEN, NET_DEVICE_FLAG_NEED_ARP,
+    },
+    protocols::arp::resolve_arp,
     transport::{icmp, TransportProtocolNumber},
 };
 
@@ -19,7 +22,7 @@ const IPV4_VERSION: u8 = 4;
 pub const IPV4_ADDR_ANY: Ipv4Address = Ipv4Address(0x00000000); // 0.0.0.0
 pub const IPV4_ADDR_BROADCAST: Ipv4Address = Ipv4Address(0xffffffff); // 255.255.255.255
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Ipv4Address(pub u32);
 
 impl TryFrom<&str> for Ipv4Address {
@@ -256,40 +259,47 @@ pub fn send(
         anyhow::bail!("ip routing not implemented");
     }
 
-    let Some(interface) = context.router.route(src) else {
-        anyhow::bail!("no route found, src: {}", src.to_string());
+    let Some(interface) = context.router.route(dst) else {
+        anyhow::bail!("no route found, dst: {}", dst.to_string());
     };
     anyhow::ensure!(
         interface.includes(dst) || dst == IPV4_ADDR_BROADCAST,
         "incoming packet not routed properly"
     );
 
-    let Some(output_device) = interface.device.as_ref() else {
+    let Some(device) = interface.device.as_ref() else {
         anyhow::bail!(
             "device not found, interface: {}",
             interface.unicast.to_string()
         );
     };
-    let output_device = output_device.upgrade().unwrap();
-    let mut output_device = output_device.lock().unwrap();
-    if output_device.mtu < data.len() {
+    let device = device.upgrade().unwrap();
+    let mut device = device.lock().unwrap();
+    if device.mtu < data.len() {
         anyhow::bail!(
             "packet too long, dev: {}, len: {}, mtu: {}",
-            output_device.name,
+            device.name,
             data.len(),
-            output_device.mtu
+            device.mtu
         );
     }
 
     let id = context.id_manager.next();
     let mut output_data = create_ip_header(id, protocol, src, dst, data);
     output_data.extend(data);
-    debug!("ipv4 packet transmitted, {:?}", output_data);
-    output_device.send(
-        &output_data,
-        NetProtocolType::Ipv4,
-        [0xff; crate::devices::NET_DEVICE_ADDR_LEN],
-    )
+
+    let hw_address = if device.flags & NET_DEVICE_FLAG_NEED_ARP != 0 {
+        // // Handle broadcast address
+        // if dst == interface.broadcast || dst == IPV4_ADDR_BROADCAST {
+        //     device.
+        // } else {
+        resolve_arp(&device, &mut context.arp_cache, dst)?
+    } else {
+        [0x00; MAC_ADDRESS_LEN]
+    };
+    let mut dst_hw_address = [0; NET_DEVICE_ADDR_LEN];
+    dst_hw_address[..MAC_ADDRESS_LEN].copy_from_slice(&hw_address);
+    device.send(&output_data, NetProtocolType::Ipv4, dst_hw_address)
 }
 
 fn create_ip_header(

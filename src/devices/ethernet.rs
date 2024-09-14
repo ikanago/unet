@@ -7,23 +7,23 @@ use crate::{
 
 use super::NetDevice;
 
-pub const MAC_ADDRESS_SIZE: usize = 6;
+pub const MAC_ADDRESS_LEN: usize = 6;
 pub const ETHERNET_FRAME_MIN_SIZE: usize = 60; // w/o FCS
 pub const ETHERNET_FRAME_MAX_SIZE: usize = 1514; // w/o FCS
 pub const ETHERNET_HEADER_SIZE: usize = 14;
 pub const ETHERNET_PAYLOAD_MIN_SIZE: usize = ETHERNET_FRAME_MIN_SIZE - ETHERNET_HEADER_SIZE;
 pub const ETHERNET_PAYLOAD_MAX_SIZE: usize = ETHERNET_FRAME_MAX_SIZE - ETHERNET_HEADER_SIZE;
 
-pub const MAC_ADDRESS_ANY: MacAddress = MacAddress([0x00; MAC_ADDRESS_SIZE]);
-pub const MAC_ADDRESS_BROADCAST: MacAddress = MacAddress([0xff; MAC_ADDRESS_SIZE]);
+pub const MAC_ADDRESS_ANY: MacAddress = MacAddress([0x00; MAC_ADDRESS_LEN]);
+pub const MAC_ADDRESS_BROADCAST: MacAddress = MacAddress([0xff; MAC_ADDRESS_LEN]);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct MacAddress(pub [u8; MAC_ADDRESS_SIZE]);
+pub struct MacAddress(pub [u8; MAC_ADDRESS_LEN]);
 
 impl From<&[u8]> for MacAddress {
     fn from(data: &[u8]) -> Self {
-        let mut addr = [0; MAC_ADDRESS_SIZE];
-        addr.copy_from_slice(&data[..MAC_ADDRESS_SIZE]);
+        let mut addr = [0; MAC_ADDRESS_LEN];
+        addr.copy_from_slice(&data[..MAC_ADDRESS_LEN]);
         MacAddress(addr)
     }
 }
@@ -49,8 +49,8 @@ impl TryFrom<&[u8]> for EthernetHeader {
     type Error = anyhow::Error;
 
     fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
-        let dst = MacAddress::from(&value[0..MAC_ADDRESS_SIZE]);
-        let src = MacAddress::from(&value[MAC_ADDRESS_SIZE..2 * MAC_ADDRESS_SIZE]);
+        let dst = MacAddress::from(&value[0..MAC_ADDRESS_LEN]);
+        let src = MacAddress::from(&value[MAC_ADDRESS_LEN..2 * MAC_ADDRESS_LEN]);
         let ty = NetProtocolType::try_from(u16::from_be_bytes([value[12], value[13]]))?;
         Ok(EthernetHeader { dst, src, ty })
     }
@@ -62,7 +62,7 @@ pub fn recv(device: &mut NetDevice) -> anyhow::Result<(NetProtocolType, Vec<u8>)
         DriverType::Tap { .. } => tap::read(device)?,
     };
     let header = EthernetHeader::try_from(data.as_ref())?;
-    if header.dst != MacAddress::from(&device.hw_addr[..MAC_ADDRESS_SIZE])
+    if header.dst != MacAddress::from(&device.hw_addr[..MAC_ADDRESS_LEN])
         && header.dst != MAC_ADDRESS_BROADCAST
     {
         anyhow::bail!(

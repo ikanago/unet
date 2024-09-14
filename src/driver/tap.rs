@@ -21,7 +21,7 @@ use crate::{
     devices::{
         ethernet::{
             EthernetHeader, MacAddress, ETHERNET_FRAME_MAX_SIZE, ETHERNET_FRAME_MIN_SIZE,
-            ETHERNET_HEADER_SIZE, ETHERNET_PAYLOAD_MAX_SIZE, MAC_ADDRESS_ANY, MAC_ADDRESS_SIZE,
+            ETHERNET_HEADER_SIZE, ETHERNET_PAYLOAD_MAX_SIZE, MAC_ADDRESS_ANY, MAC_ADDRESS_LEN,
         },
         CastType, NetDevice, NetDeviceOps, NetDeviceType, NET_DEVICE_ADDR_LEN,
         NET_DEVICE_FLAG_LOOPBACK, NET_DEVICE_FLAG_NEED_ARP,
@@ -77,7 +77,7 @@ fn open(device: &mut NetDevice) -> anyhow::Result<()> {
             anyhow::bail!("fcntl F_SETSIG failed: {}", Errno::last_raw());
         }
 
-        if device.hw_addr[..MAC_ADDRESS_SIZE] == MAC_ADDRESS_ANY.0 {
+        if device.hw_addr[..MAC_ADDRESS_LEN] == MAC_ADDRESS_ANY.0 {
             set_tap_address(device)?;
         }
     }
@@ -136,8 +136,8 @@ pub fn send(
     dst: [u8; NET_DEVICE_ADDR_LEN],
 ) -> anyhow::Result<()> {
     let header = EthernetHeader {
-        dst: MacAddress::from(dst[..MAC_ADDRESS_SIZE].as_ref()),
-        src: MacAddress::from(device.hw_addr[..MAC_ADDRESS_SIZE].as_ref()),
+        dst: MacAddress::from(dst[..MAC_ADDRESS_LEN].as_ref()),
+        src: MacAddress::from(device.hw_addr[..MAC_ADDRESS_LEN].as_ref()),
         ty,
     };
 
@@ -186,7 +186,7 @@ impl NetDevice {
             mtu: ETHERNET_PAYLOAD_MAX_SIZE,
             flags: NET_DEVICE_FLAG_LOOPBACK | NET_DEVICE_FLAG_NEED_ARP,
             header_len: ETHERNET_HEADER_SIZE as u16,
-            addr_len: MAC_ADDRESS_SIZE as u16,
+            addr_len: MAC_ADDRESS_LEN as u16,
             hw_addr: [0; NET_DEVICE_ADDR_LEN],
             // cast_type: CastType::Broadcast(MAC_ADDRESS_BROADCAST),
             cast_type: CastType::Peer([0; NET_DEVICE_ADDR_LEN]),

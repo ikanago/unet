@@ -3,6 +3,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+use arp::ArpCache;
 use ipv4::{IpRouter, Ipv4IdGenerator, Ipv4Interface};
 use log::debug;
 
@@ -83,7 +84,7 @@ impl NetProtocol {
             debug!("net protocol queue popped, len: {}", queue.len());
             match self.protocol_type {
                 NetProtocolType::Ipv4 => ipv4::recv(entry.interface, context, &entry.data)?,
-                NetProtocolType::Arp => arp::recv(&entry.interface, &entry.data)?,
+                NetProtocolType::Arp => arp::recv(&entry.interface, context, &entry.data)?,
             }
         }
         Ok(())
@@ -92,6 +93,7 @@ impl NetProtocol {
 
 #[derive(Clone, Debug)]
 pub struct NetProtocolContext {
+    pub arp_cache: ArpCache,
     pub router: IpRouter,
     pub id_manager: Ipv4IdGenerator,
 }
@@ -99,6 +101,7 @@ pub struct NetProtocolContext {
 impl NetProtocolContext {
     pub fn new() -> Self {
         NetProtocolContext {
+            arp_cache: ArpCache::new(),
             router: IpRouter::new(),
             id_manager: Ipv4IdGenerator::new(),
         }

@@ -22,6 +22,7 @@ pub struct App {
 
 impl App {
     pub fn new() -> Self {
+        let mut context = NetProtocolContext::new();
         let lo = Arc::new(Mutex::new(NetDevice::loopback()));
         let interface = Arc::new(Ipv4Interface::new(
             Ipv4Address::try_from("127.0.0.1").unwrap(),
@@ -31,6 +32,10 @@ impl App {
         lo.lock().unwrap().register_interface(interface.clone());
         let mut devices = NetDevices::new();
         devices.push_back(lo);
+        context.router.register(IpRoute::new(
+            Ipv4Address::try_from("127.0.0.1").unwrap(),
+            interface,
+        ));
 
         let eth = Arc::new(Mutex::new(NetDevice::ethernet_tap()));
         let interface = Arc::new(Ipv4Interface::new(
@@ -40,14 +45,12 @@ impl App {
         ));
         eth.lock().unwrap().register_interface(interface.clone());
         devices.push_back(eth);
-
-        run_net(&mut devices).unwrap();
-
-        let mut context = NetProtocolContext::new();
         context.router.register(IpRoute::new(
-            Ipv4Address::try_from("127.0.0.1").unwrap(),
+            Ipv4Address::try_from("192.0.2.1").unwrap(),
             interface,
         ));
+
+        run_net(&mut devices).unwrap();
 
         let mut protocols = NetProtocols::new();
         protocols.push_back(NetProtocol::ipv4());
