@@ -8,7 +8,7 @@ use log::debug;
 
 use crate::{
     devices::{ethernet::MAC_ADDRESS_BROADCAST, NetDevice, NET_DEVICE_FLAG_NEED_ARP},
-    protocols::arp::resolve_arp,
+    protocols::arp::{resolve_arp, ArpCacheState},
     transport::{icmp, TransportProtocolNumber},
 };
 
@@ -291,7 +291,13 @@ pub fn send(
         // if dst == interface.broadcast || dst == IPV4_ADDR_BROADCAST {
         //     device.
         // } else {
-        resolve_arp(&device, &mut context.arp_cache, dst)?
+        let ArpCacheState::Resolved(hw_address) =
+            resolve_arp(&mut device, &interface, &mut context.arp_cache, dst)?
+        else {
+            debug!("no arp cache hit, dst: {}", dst.to_string());
+            return Ok(());
+        };
+        hw_address
     } else {
         MAC_ADDRESS_BROADCAST
     };
@@ -327,8 +333,8 @@ fn create_ip_header(
 
 #[tracing::instrument(skip_all)]
 pub fn recv(
-    interface: Arc<Ipv4Interface>,
     context: &mut NetProtocolContext,
+    interface: Arc<Ipv4Interface>,
     data: &[u8],
 ) -> anyhow::Result<()> {
     let header = Ipv4Header::try_from(data.as_ref())?;

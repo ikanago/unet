@@ -83,8 +83,8 @@ impl NetProtocol {
         while let Some(entry) = queue.pop_front() {
             debug!("net protocol queue popped, len: {}", queue.len());
             match self.protocol_type {
-                NetProtocolType::Ipv4 => ipv4::recv(entry.interface, context, &entry.data)?,
-                NetProtocolType::Arp => arp::recv(&entry.interface, context, &entry.data)?,
+                NetProtocolType::Ipv4 => ipv4::recv(context, entry.interface, &entry.data)?,
+                NetProtocolType::Arp => arp::recv(context, &entry.interface, &entry.data)?,
             }
         }
         Ok(())

@@ -12,6 +12,7 @@ use crate::{
         ipv4::{IpRoute, Ipv4Address, Ipv4Interface},
         NetProtocol, NetProtocolContext, NetProtocols,
     },
+    transport::icmp,
 };
 
 pub struct App {
@@ -75,23 +76,25 @@ impl App {
                 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0x30, 0x21, 0x40, 0x23, 0x24,
                 0x25, 0x5e, 0x26, 0x2a, 0x28, 0x29,
             ];
-            let src = Ipv4Address::try_from("127.0.0.1").unwrap();
-            let dst = src.clone();
+            let src = Ipv4Address::try_from("192.0.2.2").unwrap();
+            let dst = Ipv4Address::try_from("192.0.2.1").unwrap();
+            let id = 42u32;
+            let mut seq = 0;
             while rx.try_recv().is_err() {
-                // let mut context = context.lock().unwrap();
-                // if let Err(err) = crate::transport::icmp::output(
-                //     &mut context,
-                //     crate::transport::icmp::IcmpType::Echo,
-                //     0,
-                //     42,
-                //     &data,
-                //     src,
-                //     dst,
-                // ) {
-                //     log::error!("transmit packet failed: {:?}", err);
-                //     break;
-                // }
-                // drop(context);
+                let mut context = context.lock().unwrap();
+                if let Err(err) = icmp::send(
+                    &mut context,
+                    icmp::IcmpType::Echo,
+                    0,
+                    (id << 16 | seq).to_be(),
+                    &data,
+                    src,
+                    dst,
+                ) {
+                    log::error!("transmit packet failed: {:?}", err);
+                }
+                seq += 1;
+                drop(context);
                 sleep(Duration::from_secs(1));
             }
         });
