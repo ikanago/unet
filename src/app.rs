@@ -12,7 +12,7 @@ use crate::{
         ipv4::{Ipv4Address, Ipv4Interface},
         NetProtocol, NetProtocolContext, NetProtocols,
     },
-    transport::icmp,
+    transport::{icmp, udp, Endpoint},
 };
 
 pub struct App {
@@ -26,8 +26,8 @@ impl App {
         let mut context = NetProtocolContext::new();
         let lo = Arc::new(Mutex::new(NetDevice::loopback()));
         let interface = Arc::new(Ipv4Interface::new(
-            Ipv4Address::from(&[127, 0, 0, 1]),
-            Ipv4Address::from(&[255, 0, 0, 0]),
+            Ipv4Address::new(&[127, 0, 0, 1]),
+            Ipv4Address::new(&[255, 0, 0, 0]),
             lo.clone(),
         ));
         lo.lock()
@@ -36,8 +36,8 @@ impl App {
 
         let eth = Arc::new(Mutex::new(NetDevice::ethernet_tap()));
         let interface = Arc::new(Ipv4Interface::new(
-            Ipv4Address::from(&[192, 0, 2, 2]),
-            Ipv4Address::from(&[255, 255, 255, 0]),
+            Ipv4Address::new(&[192, 0, 2, 2]),
+            Ipv4Address::new(&[255, 255, 255, 0]),
             eth.clone(),
         ));
         eth.lock()
@@ -46,7 +46,7 @@ impl App {
 
         context
             .router
-            .register_default(interface, Ipv4Address::from(&[192, 0, 2, 1]));
+            .register_default(interface, Ipv4Address::new(&[192, 0, 2, 1]));
 
         let mut devices = NetDevices::new();
         devices.push_back(lo);
@@ -77,26 +77,13 @@ impl App {
                 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0x30, 0x21, 0x40, 0x23, 0x24,
                 0x25, 0x5e, 0x26, 0x2a, 0x28, 0x29,
             ];
-            let src = Ipv4Address::ANY;
-            let dst = Ipv4Address::from(&[8, 8, 8, 8]);
-            // let dst = Ipv4Address::from(&[192, 0, 2, 1]);
-            let id = 42u32;
-            let mut seq = 0;
+            let src = Endpoint::new(&[127, 0, 0, 1], 8000);
+            let dst = Endpoint::new(&[127, 0, 0, 1], 8001);
             while rx.try_recv().is_err() {
                 let mut context = context.lock().unwrap();
-                info!("transmitting packet, seq: {}", seq);
-                if let Err(err) = icmp::send(
-                    &mut context,
-                    icmp::IcmpType::Echo,
-                    0,
-                    (id << 16 | seq).to_be(),
-                    &data,
-                    src,
-                    dst,
-                ) {
+                if let Err(err) = udp::send(&mut context, &data, src, dst) {
                     log::error!("transmit packet failed: {:?}", err);
                 }
-                seq += 1;
                 drop(context);
                 sleep(Duration::from_secs(1));
             }

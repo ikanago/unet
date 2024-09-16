@@ -8,13 +8,15 @@ use log::debug;
 use crate::{
     devices::{ethernet::MAC_ADDRESS_BROADCAST, NetDevice, NET_DEVICE_FLAG_NEED_ARP},
     protocols::arp::{resolve_arp, ArpCacheState},
-    transport::{icmp, TransportProtocolNumber},
+    transport::{icmp, udp, TransportProtocolNumber},
 };
 
 use super::{NetInterfaceFamily, NetProtocolContext, NetProtocolType};
 
 const IPV4_HEADER_MIN_LENGTH: u8 = 20;
 const IPV4_HEADER_MAX_LENGTH: u8 = 60;
+const IPV4_MAX_LENGTH: usize = u16::MAX as usize;
+pub const IPV4_PAYLOAD_MAX_LENGTH: usize = IPV4_MAX_LENGTH - IPV4_HEADER_MIN_LENGTH as usize;
 const IPV4_VERSION: u8 = 4;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -25,6 +27,14 @@ impl Ipv4Address {
     pub const BROADCAST: Ipv4Address = Ipv4Address(0xffffffff); // 255.255.255.255
 }
 
+impl Ipv4Address {
+    pub fn new(address: &[u8]) -> Self {
+        Ipv4Address(u32::from_be_bytes([
+            address[0], address[1], address[2], address[3],
+        ]))
+    }
+}
+
 impl std::ops::BitAnd for Ipv4Address {
     type Output = Ipv4Address;
 
@@ -33,9 +43,15 @@ impl std::ops::BitAnd for Ipv4Address {
     }
 }
 
+impl From<&[u8]> for Ipv4Address {
+    fn from(value: &[u8]) -> Self {
+        Ipv4Address(u32::from_be_bytes([value[0], value[1], value[2], value[3]]))
+    }
+}
+
 impl From<&[u8; 4]> for Ipv4Address {
     fn from(value: &[u8; 4]) -> Self {
-        Ipv4Address(u32::from_be_bytes([value[0], value[1], value[2], value[3]]))
+        Ipv4Address::from(&value[..])
     }
 }
 
@@ -131,7 +147,7 @@ impl Ipv4Header {
 
     fn validate_checksum(&self) -> anyhow::Result<()> {
         let data = self.to_bytes();
-        let checksum = crate::utils::calculate_checksum(&data);
+        let checksum = crate::utils::calculate_checksum(&data, 0);
         anyhow::ensure!(checksum == 0, "invalid checksum: {:04x}", checksum);
         Ok(())
     }
@@ -364,7 +380,7 @@ fn create_ip_header(
         dst,
     };
     let mut bytes = header.to_bytes();
-    let checksum = crate::utils::calculate_checksum(&bytes);
+    let checksum = crate::utils::calculate_checksum(&bytes, 0);
     bytes[10] = (checksum >> 8) as u8;
     bytes[11] = checksum as u8;
     bytes
@@ -394,6 +410,7 @@ pub fn recv(
     let payload = &data[header.header_length() as usize..data.len()];
     match header.protocol {
         TransportProtocolNumber::Icmp => icmp::recv(context, payload, header.src, header.dst)?,
+        TransportProtocolNumber::Udp => udp::recv(payload, header.src, header.dst)?,
     }
 
     Ok(())

@@ -86,7 +86,7 @@ pub fn send(
     };
     let mut buffer = header.to_bytes();
     buffer.extend_from_slice(data);
-    let checksum = crate::utils::calculate_checksum(&buffer);
+    let checksum = crate::utils::calculate_checksum(&buffer, 0);
     buffer[2] = checksum.to_be_bytes()[0];
     buffer[3] = checksum.to_be_bytes()[1];
     debug!(
