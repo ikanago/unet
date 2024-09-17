@@ -10,20 +10,25 @@ use crate::{
     devices::{run_net, stop_net, NetDevice, NetDevices},
     protocols::{
         ipv4::{Ipv4Address, Ipv4Interface},
-        NetProtocol, NetProtocolContext, NetProtocols,
+        NetProtocol, NetProtocols, ProtocolStackContext,
     },
-    transport::{icmp, udp, Endpoint},
+    transport::{
+        icmp,
+        udp::{self, bind},
+        ContextBlocks, Endpoint,
+    },
 };
 
 pub struct App {
     devices: Arc<Mutex<NetDevices>>,
     protocols: Arc<Mutex<NetProtocols>>,
-    context: Arc<Mutex<NetProtocolContext>>,
+    context: Arc<Mutex<ProtocolStackContext>>,
+    pcbs: Arc<Mutex<ContextBlocks>>,
 }
 
 impl App {
     pub fn new() -> Self {
-        let mut context = NetProtocolContext::new();
+        let mut context = ProtocolStackContext::new();
         let lo = Arc::new(Mutex::new(NetDevice::loopback()));
         let interface = Arc::new(Ipv4Interface::new(
             Ipv4Address::new(&[127, 0, 0, 1]),
@@ -51,7 +56,6 @@ impl App {
         let mut devices = NetDevices::new();
         devices.push_back(lo);
         devices.push_back(eth);
-
         run_net(&mut devices).unwrap();
 
         let mut protocols = NetProtocols::new();
@@ -62,12 +66,14 @@ impl App {
             devices: Arc::new(Mutex::new(devices)),
             protocols: Arc::new(Mutex::new(protocols)),
             context: Arc::new(Mutex::new(context)),
+            pcbs: Arc::new(Mutex::new(ContextBlocks::new())),
         }
     }
 
     pub fn run(&self, rx: mpsc::Receiver<()>, barrier: Arc<Barrier>) -> JoinHandle<()> {
         info!("running app");
         let context = self.context.clone();
+        let pcbs = self.pcbs.clone();
         std::thread::spawn(move || {
             barrier.wait();
             let data = [
@@ -77,14 +83,17 @@ impl App {
                 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0x30, 0x21, 0x40, 0x23, 0x24,
                 0x25, 0x5e, 0x26, 0x2a, 0x28, 0x29,
             ];
-            let src = Endpoint::new(&[127, 0, 0, 1], 8000);
+            let src = Endpoint::new(&[0, 0, 0, 0], 8000);
             let dst = Endpoint::new(&[127, 0, 0, 1], 8001);
+            let mut pcbs = pcbs.lock().unwrap();
+            bind(&mut pcbs, &src).unwrap();
+            drop(pcbs);
             while rx.try_recv().is_err() {
-                let mut context = context.lock().unwrap();
-                if let Err(err) = udp::send(&mut context, &data, src, dst) {
-                    log::error!("transmit packet failed: {:?}", err);
-                }
-                drop(context);
+                // let mut context = context.lock().unwrap();
+                // if let Err(err) = udp::send(&mut context, &data, src, dst) {
+                //     log::error!("transmit packet failed: {:?}", err);
+                // }
+                // drop(context);
                 sleep(Duration::from_secs(1));
             }
         })
@@ -113,8 +122,10 @@ impl App {
     #[tracing::instrument(skip_all)]
     pub fn handle_irq_l3(&mut self) {
         let mut context = self.context.lock().unwrap();
+        let mut pcbs = self.pcbs.lock().unwrap();
         for protocol in self.protocols.lock().unwrap().iter() {
-            if let Err(err) = protocol.recv(&mut context) {
+            log::debug!("handle irq, protocol: {:?}", protocol.protocol_type);
+            if let Err(err) = protocol.recv(&mut context, &mut pcbs) {
                 error!("handle irq failed: {:?}", err);
             }
         }

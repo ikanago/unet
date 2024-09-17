@@ -15,8 +15,8 @@ use crate::{
     driver::DriverType,
     interrupt::{IrqEntry, INTR_IRQ_L3},
     protocols::{
-        ipv4::Ipv4Interface, Ipv4QueueEntry, NetInterfaceFamily, NetProtocolContext,
-        NetProtocolType, NetProtocols,
+        ipv4::Ipv4Interface, Ipv4QueueEntry, NetInterfaceFamily, NetProtocolType, NetProtocols,
+        ProtocolStackContext,
     },
 };
 
@@ -129,7 +129,7 @@ impl NetDevice {
 
     pub fn register_interface(
         &mut self,
-        context: &mut NetProtocolContext,
+        context: &mut ProtocolStackContext,
         interface: Arc<Ipv4Interface>,
     ) {
         let network = interface.unicast & interface.netmask;
@@ -179,9 +179,10 @@ impl NetDevice {
             NetDeviceType::Ethernet => ethernet::recv(self)?,
         };
         debug!(
-            "net device recv, protocol: {:?}, len: {}",
+            "net device recv, protocol: {:?}, len: {}, {:?}",
             protocol,
-            payload.len()
+            payload.len(),
+            payload,
         );
 
         for p in protocols.iter() {

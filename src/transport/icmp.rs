@@ -1,12 +1,6 @@
-use std::sync::Arc;
-
 use log::debug;
 
-use crate::protocols::{
-    self,
-    ipv4::{Ipv4Address, Ipv4Interface},
-    NetProtocolContext,
-};
+use crate::protocols::{self, ipv4::Ipv4Address, ProtocolStackContext};
 use crate::transport::TransportProtocolNumber;
 
 #[repr(u8)]
@@ -70,7 +64,7 @@ impl TryFrom<&[u8]> for IcmpHeader {
 
 #[tracing::instrument(skip(context, code, values, data))]
 pub fn send(
-    context: &mut NetProtocolContext,
+    context: &mut ProtocolStackContext,
     ty: IcmpType,
     code: u8,
     values: u32,
@@ -101,7 +95,7 @@ pub fn send(
 
 #[tracing::instrument(skip(context, data))]
 pub fn recv(
-    context: &mut NetProtocolContext,
+    context: &mut ProtocolStackContext,
     data: &[u8],
     src: Ipv4Address,
     dst: Ipv4Address,

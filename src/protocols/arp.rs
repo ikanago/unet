@@ -13,7 +13,7 @@ use crate::{
     },
 };
 
-use super::NetProtocolContext;
+use super::ProtocolStackContext;
 
 const ARP_HARDWARE_TYPE_ETHERNET: u16 = 1;
 const ARP_OPERATION_REQUEST: u16 = 1;
@@ -21,12 +21,12 @@ const ARP_OPERATION_REPLY: u16 = 2;
 const ARP_CACHE_TIMEOUT: Duration = Duration::from_secs(600);
 
 #[derive(Clone, Debug)]
-pub struct ArpHeader {
-    pub htype: u16,
-    pub ptype: u16,
-    pub hlen: u8,
-    pub plen: u8,
-    pub oper: u16,
+struct ArpHeader {
+    htype: u16,
+    ptype: u16,
+    hlen: u8,
+    plen: u8,
+    oper: u16,
 }
 
 impl From<&[u8]> for ArpHeader {
@@ -62,12 +62,12 @@ impl ArpHeader {
 }
 
 #[derive(Clone, Debug)]
-pub struct ArpMessage {
-    pub header: ArpHeader,
-    pub sha: MacAddress,
-    pub spa: Ipv4Address,
-    pub tha: MacAddress,
-    pub tpa: Ipv4Address,
+struct ArpMessage {
+    header: ArpHeader,
+    sha: MacAddress,
+    spa: Ipv4Address,
+    tha: MacAddress,
+    tpa: Ipv4Address,
 }
 
 impl From<&[u8]> for ArpMessage {
@@ -204,7 +204,7 @@ fn send(
 
 #[tracing::instrument(skip_all)]
 pub fn recv(
-    context: &mut NetProtocolContext,
+    context: &mut ProtocolStackContext,
     interface: &Ipv4Interface,
     data: &[u8],
 ) -> anyhow::Result<()> {

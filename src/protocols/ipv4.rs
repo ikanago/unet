@@ -8,10 +8,10 @@ use log::debug;
 use crate::{
     devices::{ethernet::MAC_ADDRESS_BROADCAST, NetDevice, NET_DEVICE_FLAG_NEED_ARP},
     protocols::arp::{resolve_arp, ArpCacheState},
-    transport::{icmp, udp, TransportProtocolNumber},
+    transport::{icmp, udp, ContextBlocks, TransportProtocolNumber},
 };
 
-use super::{NetInterfaceFamily, NetProtocolContext, NetProtocolType};
+use super::{NetInterfaceFamily, NetProtocolType, ProtocolStackContext};
 
 const IPV4_HEADER_MIN_LENGTH: u8 = 20;
 const IPV4_HEADER_MAX_LENGTH: u8 = 60;
@@ -32,6 +32,10 @@ impl Ipv4Address {
         Ipv4Address(u32::from_be_bytes([
             address[0], address[1], address[2], address[3],
         ]))
+    }
+
+    pub fn to_bytes(&self) -> [u8; 4] {
+        self.0.to_be_bytes()
     }
 }
 
@@ -294,7 +298,7 @@ impl Ipv4IdGenerator {
 
 #[tracing::instrument(skip(context, protocol, data))]
 pub fn send(
-    context: &mut NetProtocolContext,
+    context: &mut ProtocolStackContext,
     protocol: TransportProtocolNumber,
     data: &[u8],
     src: Ipv4Address,
@@ -388,7 +392,8 @@ fn create_ip_header(
 
 #[tracing::instrument(skip_all)]
 pub fn recv(
-    context: &mut NetProtocolContext,
+    context: &mut ProtocolStackContext,
+    pcbs: &mut ContextBlocks,
     interface: Arc<Ipv4Interface>,
     data: &[u8],
 ) -> anyhow::Result<()> {
@@ -410,7 +415,7 @@ pub fn recv(
     let payload = &data[header.header_length() as usize..data.len()];
     match header.protocol {
         TransportProtocolNumber::Icmp => icmp::recv(context, payload, header.src, header.dst)?,
-        TransportProtocolNumber::Udp => udp::recv(payload, header.src, header.dst)?,
+        TransportProtocolNumber::Udp => udp::recv(pcbs, payload, header.src, header.dst)?,
     }
 
     Ok(())

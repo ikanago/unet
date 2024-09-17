@@ -1,3 +1,5 @@
+use udp::UdpContext;
+
 use crate::protocols::ipv4::Ipv4Address;
 
 pub mod icmp;
@@ -25,7 +27,7 @@ impl TryFrom<u8> for TransportProtocolNumber {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Endpoint {
     pub address: Ipv4Address,
     pub port: u16,
@@ -43,5 +45,17 @@ impl Endpoint {
 impl std::fmt::Display for Endpoint {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}:{}", self.address, self.port)
+    }
+}
+
+pub struct ContextBlocks {
+    pub udp_pcb: UdpContext,
+}
+
+impl ContextBlocks {
+    pub fn new() -> Self {
+        ContextBlocks {
+            udp_pcb: UdpContext::new(),
+        }
     }
 }

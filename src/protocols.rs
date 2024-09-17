@@ -7,6 +7,8 @@ use arp::ArpCache;
 use ipv4::{Ipv4IdGenerator, Ipv4Interface, Ipv4Router};
 use log::debug;
 
+use crate::transport::ContextBlocks;
+
 pub mod arp;
 pub mod ipv4;
 
@@ -78,12 +80,16 @@ impl NetProtocol {
 
 impl NetProtocol {
     #[tracing::instrument(skip_all)]
-    pub fn recv(&self, context: &mut NetProtocolContext) -> anyhow::Result<()> {
+    pub fn recv(
+        &self,
+        context: &mut ProtocolStackContext,
+        pcbs: &mut ContextBlocks,
+    ) -> anyhow::Result<()> {
         let mut queue = self.queue.lock().unwrap();
         while let Some(entry) = queue.pop_front() {
             debug!("net protocol queue popped, len: {}", queue.len());
             match self.protocol_type {
-                NetProtocolType::Ipv4 => ipv4::recv(context, entry.interface, &entry.data)?,
+                NetProtocolType::Ipv4 => ipv4::recv(context, pcbs, entry.interface, &entry.data)?,
                 NetProtocolType::Arp => arp::recv(context, &entry.interface, &entry.data)?,
             }
         }
@@ -92,15 +98,15 @@ impl NetProtocol {
 }
 
 #[derive(Clone, Debug)]
-pub struct NetProtocolContext {
+pub struct ProtocolStackContext {
     pub arp_cache: ArpCache,
     pub router: Ipv4Router,
     pub id_manager: Ipv4IdGenerator,
 }
 
-impl NetProtocolContext {
+impl ProtocolStackContext {
     pub fn new() -> Self {
-        NetProtocolContext {
+        ProtocolStackContext {
             arp_cache: ArpCache::new(),
             router: Ipv4Router::new(),
             id_manager: Ipv4IdGenerator::new(),
