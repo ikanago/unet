@@ -6,7 +6,7 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0.86"
 log = "0.4.22"
-nix = { version = "0.30.0", features = ["ioctl", "socket"] }
+nix = { version = "0.31.0", features = ["ioctl", "socket"] }
 signal-hook = "0.3.17"
 tracing = "0.1.40"
 tracing-log = "0.2.0"
